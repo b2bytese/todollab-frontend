@@ -21,7 +21,6 @@ import {
   horizontalListSortingStrategy,
   sortableKeyboardCoordinates,
 } from '@dnd-kit/sortable';
-import { useQueryClient } from '@tanstack/react-query';
 import { Loader2, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
@@ -30,7 +29,6 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
-  boardKeys,
   useCreateColumnMutation,
   useDeleteColumnMutation,
   useMoveColumnMutation,
@@ -115,6 +113,26 @@ function getTargetIndexInColumn(
   return idx >= 0 ? idx : allColumnTasks.length;
 }
 
+function computeTaskInsertIndex(
+  active: Active,
+  over: Over,
+  targetColTasks: readonly TaskItem[],
+): number | null {
+  const overType = over.data.current?.type;
+  if (overType !== 'task') {
+    return targetColTasks.length;
+  }
+  const overTaskId = (over.data.current?.task as TaskItem | undefined)?.id;
+  if (!overTaskId) {
+    return null;
+  }
+  const overIdx = targetColTasks.findIndex((t) => t.id === overTaskId);
+  if (overIdx < 0) {
+    return null;
+  }
+  return overIdx + (isActiveCenterBelowOver(active, over) ? 1 : 0);
+}
+
 export function BoardKanbanView({
   detail,
   filteredTasks,
@@ -123,7 +141,6 @@ export function BoardKanbanView({
   filtersActive = false,
 }: BoardKanbanViewProps) {
   const boardId = detail.board.id;
-  const queryClient = useQueryClient();
 
   const moveTaskMutation = useMoveTaskMutation(boardId);
   const moveColumnMutation = useMoveColumnMutation(boardId);
@@ -143,12 +160,6 @@ export function BoardKanbanView({
   const [activeDrag, setActiveDrag] = useState<ActiveDragState>(null);
   const [dragOverPreview, setDragOverPreview] =
     useState<DragOverTaskPreview | null>(null);
-  const [optimisticTasksById, setOptimisticTasksById] = useState<
-    Record<string, TaskItem>
-  >({});
-  const [optimisticColumnPositions, setOptimisticColumnPositions] = useState<
-    Record<string, number>
-  >({});
 
   const [isAddingColumn, setIsAddingColumn] = useState(false);
   const [newColumnName, setNewColumnName] = useState('');
@@ -162,21 +173,14 @@ export function BoardKanbanView({
   useEffect(() => {
     setActiveDrag(null);
     setDragOverPreview(null);
-    setOptimisticTasksById({});
-    setOptimisticColumnPositions({});
     setIsAddingColumn(false);
     setDeleteTarget(null);
   }, [boardId]);
 
-  const sortedColumns = useMemo(() => {
-    return detail.columns
-      .map((col) =>
-        optimisticColumnPositions[col.id] !== undefined
-          ? { ...col, position: optimisticColumnPositions[col.id] }
-          : col,
-      )
-      .sort((a, b) => a.position - b.position);
-  }, [detail.columns, optimisticColumnPositions]);
+  const sortedColumns = useMemo(
+    () => [...detail.columns].sort((a, b) => a.position - b.position),
+    [detail.columns],
+  );
 
   const columnsById = useMemo(
     () => new Map(sortedColumns.map((col) => [col.id, col])),
@@ -193,28 +197,16 @@ export function BoardKanbanView({
     [detail.members],
   );
 
-  const baseAllTasks = useMemo(
-    () =>
-      detail.tasks.map((task) => optimisticTasksById[task.id] ?? task),
-    [detail.tasks, optimisticTasksById],
-  );
-
-  const baseFilteredTasks = useMemo(
-    () =>
-      filteredTasks.map((task) => optimisticTasksById[task.id] ?? task),
-    [filteredTasks, optimisticTasksById],
-  );
-
   const previewFilteredTasks = useMemo(() => {
     if (!dragOverPreview) {
-      return baseFilteredTasks;
+      return filteredTasks;
     }
-    return baseFilteredTasks.map((task) =>
+    return filteredTasks.map((task) =>
       task.id === dragOverPreview.taskId
         ? { ...task, columnId: dragOverPreview.columnId }
         : task,
     );
-  }, [baseFilteredTasks, dragOverPreview]);
+  }, [filteredTasks, dragOverPreview]);
 
   const visibleTasksByColumn = useMemo(() => {
     const grouped = new Map<string, TaskItem[]>();
@@ -254,11 +246,11 @@ export function BoardKanbanView({
     for (const col of sortedColumns) {
       counts.set(col.id, 0);
     }
-    for (const task of baseAllTasks) {
+    for (const task of detail.tasks) {
       counts.set(task.columnId, (counts.get(task.columnId) ?? 0) + 1);
     }
     return counts;
-  }, [sortedColumns, baseAllTasks]);
+  }, [sortedColumns, detail.tasks]);
 
   const columnSortableIds = useMemo(
     () => sortedColumns.map((col) => `column:${col.id}`),
@@ -331,7 +323,7 @@ export function BoardKanbanView({
     }
 
     const activeTaskId = (active.data.current.task as TaskItem).id;
-    const origTask = baseFilteredTasks.find((t) => t.id === activeTaskId);
+    const origTask = filteredTasks.find((t) => t.id === activeTaskId);
     if (!origTask) {
       return;
     }
@@ -340,7 +332,29 @@ export function BoardKanbanView({
     const overType = over.data.current?.type;
     const overColumnId = resolveOverColumnId(over, previewFilteredTasks);
 
-    if (!overColumnId || overColumnId === currentColumnId) {
+    if (!overColumnId) {
+      return;
+    }
+
+    if (overColumnId === currentColumnId) {
+      if (
+        dragOverPreview &&
+        dragOverPreview.taskId === activeTaskId &&
+        overColumnId !== origTask.columnId &&
+        overType === 'task'
+      ) {
+        const targetColTasks = (
+          visibleTasksByColumn.get(overColumnId) ?? []
+        ).filter((t) => t.id !== activeTaskId);
+        const insertIndex = computeTaskInsertIndex(active, over, targetColTasks);
+        if (insertIndex !== null && insertIndex !== dragOverPreview.index) {
+          setDragOverPreview({
+            taskId: activeTaskId,
+            columnId: overColumnId,
+            index: insertIndex,
+          });
+        }
+      }
       return;
     }
 
@@ -349,18 +363,12 @@ export function BoardKanbanView({
       return;
     }
 
-    const targetColTasks = (visibleTasksByColumn.get(overColumnId) ?? []).filter(
-      (t) => t.id !== activeTaskId,
-    );
-
-    let insertIndex = targetColTasks.length;
-    if (overType === 'task') {
-      const overTaskId = (over.data.current?.task as TaskItem).id;
-      const overIdx = targetColTasks.findIndex((t) => t.id === overTaskId);
-      if (overIdx >= 0) {
-        insertIndex = overIdx + (isActiveCenterBelowOver(active, over) ? 1 : 0);
-      }
-    }
+    const targetColTasks = (
+      visibleTasksByColumn.get(overColumnId) ?? []
+    ).filter((t) => t.id !== activeTaskId);
+    const insertIndex =
+      computeTaskInsertIndex(active, over, targetColTasks) ??
+      targetColTasks.length;
 
     setDragOverPreview({
       taskId: activeTaskId,
@@ -395,38 +403,7 @@ export function BoardKanbanView({
     );
     const newPosition = calculateDropPosition(colsWithoutMoving, overIndex);
 
-    setOptimisticColumnPositions((prev) => ({
-      ...prev,
-      [movingColumnId]: newPosition,
-    }));
-
-    moveColumnMutation.mutate(
-      { columnId: movingColumnId, position: newPosition },
-      {
-        onSuccess: (updatedColumns) => {
-          if (queryClient.getQueryData(boardKeys.detail(boardId))) {
-            setOptimisticColumnPositions((prev) => {
-              const next = { ...prev };
-              delete next[movingColumnId];
-              return next;
-            });
-            return;
-          }
-          const nextMap: Record<string, number> = {};
-          for (const col of updatedColumns) {
-            nextMap[col.id] = col.position;
-          }
-          setOptimisticColumnPositions(nextMap);
-        },
-        onError: () => {
-          setOptimisticColumnPositions((prev) => {
-            const next = { ...prev };
-            delete next[movingColumnId];
-            return next;
-          });
-        },
-      },
-    );
+    moveColumnMutation.mutate({ columnId: movingColumnId, position: newPosition });
   };
 
   const commitTaskMove = (
@@ -435,7 +412,7 @@ export function BoardKanbanView({
     currentPreview: DragOverTaskPreview | null,
   ) => {
     const activeTaskId = (active.data.current?.task as TaskItem).id;
-    const origTask = baseFilteredTasks.find((t) => t.id === activeTaskId);
+    const origTask = filteredTasks.find((t) => t.id === activeTaskId);
     if (!origTask) {
       return;
     }
@@ -453,7 +430,7 @@ export function BoardKanbanView({
       return;
     }
 
-    const visibleTargetTasksAll = baseFilteredTasks
+    const visibleTargetTasksAll = filteredTasks
       .filter((t) => t.columnId === targetColumnId)
       .sort((a, b) => a.position - b.position);
 
@@ -493,7 +470,7 @@ export function BoardKanbanView({
       }
     }
 
-    const allTargetWithoutActive = baseAllTasks
+    const allTargetWithoutActive = detail.tasks
       .filter((t) => t.columnId === targetColumnId && t.id !== activeTaskId)
       .sort((a, b) => a.position - b.position);
 
@@ -515,74 +492,11 @@ export function BoardKanbanView({
       return;
     }
 
-    const targetColumn = columnsById.get(targetColumnId);
-    const now = new Date().toISOString();
-    const nextCompleted = targetColumn
-      ? targetColumn.isDoneColumn
-      : origTask.completed;
-
-    setOptimisticTasksById((prev) => ({
-      ...prev,
-      [origTask.id]: {
-        ...origTask,
-        columnId: targetColumnId,
-        position: newPosition,
-        completed: nextCompleted,
-        completedAt: targetColumn
-          ? nextCompleted
-            ? (origTask.completedAt ?? now)
-            : null
-          : origTask.completedAt,
-        updatedAt: now,
-      },
-    }));
-
-    moveTaskMutation.mutate(
-      {
-        taskId: origTask.id,
-        targetColumnId,
-        position: newPosition,
-      },
-      {
-        onSuccess: (moveResult) => {
-          if (queryClient.getQueryData(boardKeys.detail(boardId))) {
-            setOptimisticTasksById((prev) => {
-              const next = { ...prev };
-              delete next[origTask.id];
-              return next;
-            });
-            return;
-          }
-
-          const positionMap = new Map(
-            moveResult.columnPositions.map((p) => [p.id, p.position]),
-          );
-          setOptimisticTasksById((prev) => {
-            const next: Record<string, TaskItem> = {
-              ...prev,
-              [moveResult.task.id]: moveResult.task,
-            };
-            for (const task of baseAllTasks) {
-              if (task.id === moveResult.task.id) {
-                continue;
-              }
-              const updatedPos = positionMap.get(task.id);
-              if (updatedPos !== undefined) {
-                next[task.id] = { ...task, position: updatedPos };
-              }
-            }
-            return next;
-          });
-        },
-        onError: () => {
-          setOptimisticTasksById((prev) => {
-            const next = { ...prev };
-            delete next[origTask.id];
-            return next;
-          });
-        },
-      },
-    );
+    moveTaskMutation.mutate({
+      taskId: origTask.id,
+      targetColumnId,
+      position: newPosition,
+    });
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
@@ -661,7 +575,7 @@ export function BoardKanbanView({
 
   const activeTaskOverlay =
     activeDrag?.type === 'task'
-      ? baseFilteredTasks.find((t) => t.id === activeDrag.taskId) ?? null
+      ? filteredTasks.find((t) => t.id === activeDrag.taskId) ?? null
       : null;
 
   const activeColumnOverlay =
