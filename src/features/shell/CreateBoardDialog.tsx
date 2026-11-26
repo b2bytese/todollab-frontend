@@ -141,10 +141,14 @@ export function CreateBoardDialog({
               placeholder="Ex.: Roadmap do Produto"
               autoFocus
               disabled={createBoardMutation.isPending}
+              aria-invalid={Boolean(errors.name)}
+              aria-describedby={errors.name ? 'board-name-error' : undefined}
               {...register('name')}
             />
             {errors.name ? (
-              <p className="text-xs text-destructive">{errors.name.message}</p>
+              <p id="board-name-error" className="text-xs text-destructive">
+                {errors.name.message}
+              </p>
             ) : null}
           </div>
 
@@ -155,10 +159,14 @@ export function CreateBoardDialog({
               placeholder="Descreva o objetivo deste quadro..."
               rows={2}
               disabled={createBoardMutation.isPending}
+              aria-invalid={Boolean(errors.description)}
+              aria-describedby={
+                errors.description ? 'board-description-error' : undefined
+              }
               {...register('description')}
             />
             {errors.description ? (
-              <p className="text-xs text-destructive">
+              <p id="board-description-error" className="text-xs text-destructive">
                 {errors.description.message}
               </p>
             ) : null}

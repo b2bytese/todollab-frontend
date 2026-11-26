@@ -1,6 +1,6 @@
 import { AxiosError, AxiosHeaders, type AxiosAdapter, type InternalAxiosRequestConfig } from 'axios';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { api } from '@/lib/api';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { api, refreshAccessToken, resolveApiBaseUrl } from '@/lib/api';
 import { useAuthStore } from '@/stores/authStore';
 import type { UserProfile } from '@/types/api';
 
@@ -129,5 +129,73 @@ describe('api single-flight refresh interceptor', () => {
     expect(useAuthStore.getState().status).toBe('unauthenticated');
     expect(useAuthStore.getState().accessToken).toBeNull();
     expect(useAuthStore.getState().user).toBeNull();
+  });
+
+  it('does not resurrect session if clearSession runs while refreshAccessToken is in flight', async () => {
+    let onRefreshStarted!: () => void;
+    const refreshStarted = new Promise<void>((resolve) => {
+      onRefreshStarted = resolve;
+    });
+
+    let resolveRefresh!: (value: {
+      status: number;
+      statusText: string;
+      headers: AxiosHeaders;
+      config: InternalAxiosRequestConfig;
+      data: { accessToken: string; user: UserProfile };
+    }) => void;
+    let refreshConfig!: InternalAxiosRequestConfig;
+
+    api.defaults.adapter = (config) => {
+      if (config.url === '/api/v1/auth/refresh') {
+        refreshConfig = config;
+        onRefreshStarted();
+        return new Promise((resolve) => {
+          resolveRefresh = resolve;
+        });
+      }
+      throw makeAxiosError(401, config);
+    };
+
+    useAuthStore.getState().setSession('expired-token', mockUser);
+    const refreshPromise = refreshAccessToken();
+
+    await refreshStarted;
+    useAuthStore.getState().clearSession();
+
+    resolveRefresh({
+      status: 200,
+      statusText: 'OK',
+      headers: new AxiosHeaders(),
+      config: refreshConfig,
+      data: {
+        accessToken: 'stale-fresh-token',
+        user: mockUser,
+      },
+    });
+
+    await expect(refreshPromise).rejects.toThrow('Session cleared during refresh');
+    expect(useAuthStore.getState().status).toBe('unauthenticated');
+    expect(useAuthStore.getState().accessToken).toBeNull();
+    expect(useAuthStore.getState().user).toBeNull();
+  });
+
+  it('configures default axios timeout of 20000ms', () => {
+    expect(api.defaults.timeout).toBe(20_000);
+  });
+
+  it('resolves API base URL with trimmed env, dev localhost fallback, and prod origin fallback', () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(resolveApiBaseUrl('  https://api.todollab.dev  ', true)).toBe(
+      'https://api.todollab.dev',
+    );
+    expect(resolveApiBaseUrl(undefined, false)).toBe('http://localhost:8080');
+    expect(resolveApiBaseUrl('   ', false)).toBe('http://localhost:8080');
+
+    expect(resolveApiBaseUrl(undefined, true)).toBe(window.location.origin);
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+
+    errorSpy.mockRestore();
   });
 });

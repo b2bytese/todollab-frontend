@@ -1,8 +1,10 @@
 import { AxiosError, AxiosHeaders, type AxiosAdapter, type InternalAxiosRequestConfig } from 'axios';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ThemeProvider } from '@/components/common/ThemeProvider';
+import { boardKeys } from '@/features/boards/api';
 import { SettingsPage } from '@/features/settings/SettingsPage';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/stores/authStore';
@@ -32,12 +34,23 @@ function makeAxiosError(status: number, config: InternalAxiosRequestConfig, data
   );
 }
 
-function renderSettingsPage() {
-  return render(
-    <ThemeProvider defaultTheme="light">
-      <SettingsPage />
-    </ThemeProvider>,
-  );
+function renderSettingsPage(queryClient?: QueryClient) {
+  const client =
+    queryClient ??
+    new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+  return {
+    queryClient: client,
+    ...render(
+      <QueryClientProvider client={client}>
+        <ThemeProvider defaultTheme="light">
+          <SettingsPage />
+        </ThemeProvider>
+      </QueryClientProvider>,
+    ),
+  };
 }
 
 describe('SettingsPage', () => {
@@ -197,5 +210,98 @@ describe('SettingsPage', () => {
 
     await user.click(screen.getByRole('button', { name: /claro/i }));
     expect(document.documentElement.classList.contains('dark')).toBe(false);
+  });
+
+  it('invalidatesBoardQueriesInQueryClientWhenProfileIsSaved', async () => {
+    const user = userEvent.setup();
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+
+    api.defaults.adapter = async (config) => {
+      if (config.method?.toLowerCase() === 'patch' && config.url === '/api/v1/users/me') {
+        const payload = (
+          typeof config.data === 'string' ? JSON.parse(config.data) : config.data
+        ) as { name: string; avatarColor: string };
+        return {
+          status: 200,
+          statusText: 'OK',
+          headers: new AxiosHeaders(),
+          config,
+          data: {
+            ...mockUser,
+            name: payload.name,
+            avatarColor: payload.avatarColor,
+          },
+        };
+      }
+      throw new Error(`Unexpected request: ${config.method} ${config.url}`);
+    };
+
+    renderSettingsPage(queryClient);
+
+    const nameInput = screen.getByLabelText(/nome completo/i);
+    await user.clear(nameInput);
+    await user.type(nameInput, 'Ana Atualizada');
+    await user.click(screen.getByRole('button', { name: /salvar perfil/i }));
+
+    await waitFor(() => {
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: boardKeys.all });
+    });
+  });
+
+  it('usesAccessibleHeadingHierarchyAndAriaAttributesOnValidationErrors', async () => {
+    const user = userEvent.setup();
+    renderSettingsPage();
+
+    expect(
+      screen.getByRole('heading', { level: 1, name: /configurações/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { level: 2, name: /^perfil$/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { level: 2, name: /^segurança$/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { level: 2, name: /^aparência$/i }),
+    ).toBeInTheDocument();
+
+    const nameInput = screen.getByLabelText(/nome completo/i);
+    await user.clear(nameInput);
+    await user.type(nameInput, 'A');
+    await user.click(screen.getByRole('button', { name: /salvar perfil/i }));
+
+    const nameError = await screen.findByText(/o nome deve ter pelo menos 2 caracteres/i);
+    expect(nameError).toHaveAttribute('id');
+    expect(nameInput).toHaveAttribute('aria-invalid', 'true');
+    expect(nameInput).toHaveAttribute('aria-describedby', nameError.id);
+
+    await user.click(screen.getByRole('button', { name: /alterar senha/i }));
+
+    const currentPasswordInput = screen.getByLabelText(/senha atual/i);
+    const currentPasswordError = await screen.findByText(/informe sua senha atual/i);
+    expect(currentPasswordError).toHaveAttribute('id');
+    expect(currentPasswordInput).toHaveAttribute('aria-invalid', 'true');
+    expect(currentPasswordInput).toHaveAttribute(
+      'aria-describedby',
+      currentPasswordError.id,
+    );
+
+    const newPasswordInput = screen.getByLabelText(/^nova senha$/i);
+    const newPasswordError = screen.getByText(/a nova senha deve ter pelo menos 8 caracteres/i);
+    expect(newPasswordError).toHaveAttribute('id');
+    expect(newPasswordInput).toHaveAttribute('aria-invalid', 'true');
+    expect(newPasswordInput).toHaveAttribute('aria-describedby', newPasswordError.id);
+
+    const confirmPasswordInput = screen.getByLabelText(/confirmar nova senha/i);
+    const confirmPasswordError = screen.getByText(/confirme a nova senha/i);
+    expect(confirmPasswordError).toHaveAttribute('id');
+    expect(confirmPasswordInput).toHaveAttribute('aria-invalid', 'true');
+    expect(confirmPasswordInput).toHaveAttribute(
+      'aria-describedby',
+      confirmPasswordError.id,
+    );
   });
 });

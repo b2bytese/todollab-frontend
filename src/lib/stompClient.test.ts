@@ -10,6 +10,7 @@ import {
   MAX_RECONNECT_DELAY_MS,
   createBoardStompClient,
   isJwtExpiringSoon,
+  resolveWsBaseUrl,
 } from '@/lib/stompClient';
 import type { BoardEvent } from '@/types/api';
 
@@ -164,6 +165,61 @@ describe('stompClient', () => {
       expect(client.connectHeaders).toEqual({
         Authorization: `Bearer ${freshToken}`,
       });
+    });
+
+    it('deactivates client in beforeConnect when token remains null after refresh failure', async () => {
+      const refreshToken = vi
+        .fn()
+        .mockRejectedValue(new Error('Refresh failed'));
+      const client = createBoardStompClient({
+        boardId: 'board-1',
+        getAccessToken: () => null,
+        refreshToken,
+        onEvent: vi.fn(),
+      });
+      client.connectHeaders = { Authorization: 'Bearer stale-token' };
+      const deactivateSpy = vi
+        .spyOn(client, 'deactivate')
+        .mockResolvedValue(undefined);
+
+      await client.beforeConnect(client);
+
+      expect(refreshToken).toHaveBeenCalledTimes(1);
+      expect(deactivateSpy).toHaveBeenCalledTimes(1);
+      expect(client.connectHeaders).toEqual({});
+      expect(client.connectHeaders).not.toHaveProperty('Authorization');
+    });
+  });
+
+  describe('resolveWsBaseUrl', () => {
+    it('derives ws/wss URL from API_BASE_URL when VITE_WS_URL is omitted', () => {
+      expect(
+        resolveWsBaseUrl(undefined, 'https://api.todollab.app', true),
+      ).toBe('wss://api.todollab.app/ws');
+      expect(
+        resolveWsBaseUrl(undefined, 'https://api.todollab.app/', true),
+      ).toBe('wss://api.todollab.app/ws');
+      expect(resolveWsBaseUrl(undefined, 'http://localhost:8080', false)).toBe(
+        'ws://localhost:8080/ws',
+      );
+    });
+
+    it('uses trimmed VITE_WS_URL when provided and falls back safely when apiBaseUrl is empty', () => {
+      expect(
+        resolveWsBaseUrl(
+          '  wss://ws.todollab.app/ws  ',
+          'https://api.todollab.app',
+          true,
+        ),
+      ).toBe('wss://ws.todollab.app/ws');
+      expect(resolveWsBaseUrl(undefined, '', false)).toBe(
+        'ws://localhost:8080/ws',
+      );
+      const expectedProto =
+        window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      expect(resolveWsBaseUrl(undefined, '', true)).toBe(
+        `${expectedProto}//${window.location.host}/ws`,
+      );
     });
   });
 });

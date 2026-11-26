@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { useQueryClient } from '@tanstack/react-query';
 import { Check, Loader2, Monitor, Moon, Palette, Shield, Sun, User } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
@@ -21,6 +22,7 @@ import {
   AuthErrorAlert,
   PasswordInput,
 } from '@/features/auth/authFormHelpers';
+import { boardKeys } from '@/features/boards/api';
 import { api, getApiError } from '@/lib/api';
 import { AVATAR_COLORS } from '@/lib/avatarColors';
 import { cn } from '@/lib/utils';
@@ -83,6 +85,7 @@ const THEME_OPTIONS: readonly {
 ];
 
 export function SettingsPage() {
+  const queryClient = useQueryClient();
   const user = useAuthStore((s) => s.user);
   const updateUser = useAuthStore((s) => s.updateUser);
   const { theme, setTheme } = useTheme();
@@ -127,6 +130,7 @@ export function SettingsPage() {
         avatarColor: values.avatarColor,
       });
       updateUser(data);
+      void queryClient.invalidateQueries({ queryKey: boardKeys.all });
       toast.success('Perfil atualizado com sucesso!');
     } catch (err) {
       const problem = getApiError(err);
@@ -184,7 +188,7 @@ export function SettingsPage() {
         <CardHeader>
           <div className="flex items-center gap-2">
             <User className="h-4 w-4 text-brand-coral" aria-hidden="true" />
-            <CardTitle>Perfil</CardTitle>
+            <CardTitle as="h2">Perfil</CardTitle>
           </div>
           <CardDescription>
             Atualize seu nome de exibição e a cor do seu avatar.
@@ -220,10 +224,16 @@ export function SettingsPage() {
                 id="settings-name"
                 placeholder="Seu nome completo"
                 disabled={profileForm.formState.isSubmitting}
+                aria-invalid={Boolean(profileForm.formState.errors.name)}
+                aria-describedby={
+                  profileForm.formState.errors.name
+                    ? 'settings-name-error'
+                    : undefined
+                }
                 {...profileForm.register('name')}
               />
               {profileForm.formState.errors.name ? (
-                <p className="text-xs text-destructive">
+                <p id="settings-name-error" className="text-xs text-destructive">
                   {profileForm.formState.errors.name.message}
                 </p>
               ) : null}
@@ -231,7 +241,16 @@ export function SettingsPage() {
 
             <div className="space-y-2">
               <Label>Cor do avatar</Label>
-              <div className="flex flex-wrap gap-2.5">
+              <div
+                className="flex flex-wrap gap-2.5"
+                role="group"
+                aria-label="Cor do avatar"
+                aria-describedby={
+                  profileForm.formState.errors.avatarColor
+                    ? 'settings-avatar-color-error'
+                    : undefined
+                }
+              >
                 {AVATAR_COLORS.map((color) => {
                   const active =
                     watchedAvatarColor.toLowerCase() === color.toLowerCase();
@@ -263,7 +282,10 @@ export function SettingsPage() {
                 })}
               </div>
               {profileForm.formState.errors.avatarColor ? (
-                <p className="text-xs text-destructive">
+                <p
+                  id="settings-avatar-color-error"
+                  className="text-xs text-destructive"
+                >
                   {profileForm.formState.errors.avatarColor.message}
                 </p>
               ) : null}
@@ -293,7 +315,7 @@ export function SettingsPage() {
         <CardHeader>
           <div className="flex items-center gap-2">
             <Shield className="h-4 w-4 text-brand-coral" aria-hidden="true" />
-            <CardTitle>Segurança</CardTitle>
+            <CardTitle as="h2">Segurança</CardTitle>
           </div>
           <CardDescription>
             Altere sua senha para manter sua conta protegida.
@@ -314,10 +336,21 @@ export function SettingsPage() {
                 autoComplete="current-password"
                 placeholder="Digite sua senha atual"
                 disabled={passwordForm.formState.isSubmitting}
+                aria-invalid={Boolean(
+                  passwordForm.formState.errors.currentPassword,
+                )}
+                aria-describedby={
+                  passwordForm.formState.errors.currentPassword
+                    ? 'current-password-error'
+                    : undefined
+                }
                 {...passwordForm.register('currentPassword')}
               />
               {passwordForm.formState.errors.currentPassword ? (
-                <p className="text-xs text-destructive">
+                <p
+                  id="current-password-error"
+                  className="text-xs text-destructive"
+                >
                   {passwordForm.formState.errors.currentPassword.message}
                 </p>
               ) : null}
@@ -331,10 +364,18 @@ export function SettingsPage() {
                   autoComplete="new-password"
                   placeholder="Mínimo 8 caracteres"
                   disabled={passwordForm.formState.isSubmitting}
+                  aria-invalid={Boolean(
+                    passwordForm.formState.errors.newPassword,
+                  )}
+                  aria-describedby={
+                    passwordForm.formState.errors.newPassword
+                      ? 'new-password-error'
+                      : undefined
+                  }
                   {...passwordForm.register('newPassword')}
                 />
                 {passwordForm.formState.errors.newPassword ? (
-                  <p className="text-xs text-destructive">
+                  <p id="new-password-error" className="text-xs text-destructive">
                     {passwordForm.formState.errors.newPassword.message}
                   </p>
                 ) : null}
@@ -347,10 +388,21 @@ export function SettingsPage() {
                   autoComplete="new-password"
                   placeholder="Repita a nova senha"
                   disabled={passwordForm.formState.isSubmitting}
+                  aria-invalid={Boolean(
+                    passwordForm.formState.errors.confirmNewPassword,
+                  )}
+                  aria-describedby={
+                    passwordForm.formState.errors.confirmNewPassword
+                      ? 'confirm-new-password-error'
+                      : undefined
+                  }
                   {...passwordForm.register('confirmNewPassword')}
                 />
                 {passwordForm.formState.errors.confirmNewPassword ? (
-                  <p className="text-xs text-destructive">
+                  <p
+                    id="confirm-new-password-error"
+                    className="text-xs text-destructive"
+                  >
                     {passwordForm.formState.errors.confirmNewPassword.message}
                   </p>
                 ) : null}
@@ -380,7 +432,7 @@ export function SettingsPage() {
         <CardHeader>
           <div className="flex items-center gap-2">
             <Palette className="h-4 w-4 text-brand-coral" aria-hidden="true" />
-            <CardTitle>Aparência</CardTitle>
+            <CardTitle as="h2">Aparência</CardTitle>
           </div>
           <CardDescription>
             Escolha o tema de cores utilizado no Todollab.

@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { ThemeProvider } from '@/components/common/ThemeProvider';
@@ -173,5 +174,21 @@ describe('LandingPage', () => {
     expect(externalLink).toHaveAttribute('href', 'https://b2byte.com/');
     expect(externalLink).toHaveAttribute('target', '_blank');
     expect(externalLink).toHaveAttribute('rel', 'noopener noreferrer');
+  });
+
+  it('setsAriaPressedOnWorkspacePreviewModeButtonsAndTogglesOnClick', async () => {
+    const user = userEvent.setup();
+    renderLandingPage();
+
+    const kanbanButton = screen.getByRole('button', { name: /^kanban$/i });
+    const listButton = screen.getByRole('button', { name: /^lista$/i });
+
+    expect(kanbanButton).toHaveAttribute('aria-pressed', 'true');
+    expect(listButton).toHaveAttribute('aria-pressed', 'false');
+
+    await user.click(listButton);
+
+    expect(kanbanButton).toHaveAttribute('aria-pressed', 'false');
+    expect(listButton).toHaveAttribute('aria-pressed', 'true');
   });
 });

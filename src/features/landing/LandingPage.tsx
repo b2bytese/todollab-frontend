@@ -199,6 +199,7 @@ function WorkspacePreview() {
         <div className="inline-flex rounded-lg border border-border bg-background p-0.5 text-xs">
           <button
             type="button"
+            aria-pressed={previewMode === 'KANBAN'}
             onClick={() => setPreviewMode('KANBAN')}
             className={cn(
               'rounded-md px-2.5 py-1 font-medium transition-colors cursor-pointer',
@@ -211,6 +212,7 @@ function WorkspacePreview() {
           </button>
           <button
             type="button"
+            aria-pressed={previewMode === 'LIST'}
             onClick={() => setPreviewMode('LIST')}
             className={cn(
               'rounded-md px-2.5 py-1 font-medium transition-colors cursor-pointer',

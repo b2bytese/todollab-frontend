@@ -13,11 +13,12 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
-import { PRIORITY_META } from '@/features/boards/BoardFilterBar';
 import {
   useCreateTaskMutation,
   useToggleTaskCompleteMutation,
 } from '@/features/tasks/api';
+import { formatLocalDueDate, getLocalTodayIso } from '@/lib/date';
+import { getPriorityMeta } from '@/lib/taskMeta';
 import { cn } from '@/lib/utils';
 import type {
   BoardColumn,
@@ -25,26 +26,6 @@ import type {
   BoardTag,
   TaskItem,
 } from '@/types/api';
-
-function getLocalTodayIso(now: Date = new Date()): string {
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-function formatDueDate(dueDate: string): string {
-  const parts = dueDate.split('-').map(Number);
-  if (parts.length !== 3 || parts.some(Number.isNaN)) {
-    return dueDate;
-  }
-  const [year, month, day] = parts;
-  const localDate = new Date(year, month - 1, day);
-  return new Intl.DateTimeFormat('pt-BR', {
-    day: '2-digit',
-    month: 'short',
-  }).format(localDate);
-}
 
 export interface BoardListViewProps {
   boardId: string;
@@ -214,7 +195,7 @@ export function BoardListView({
                   </p>
                 ) : (
                   columnTasks.map((task) => {
-                    const priorityMeta = PRIORITY_META[task.priority];
+                    const priorityMeta = getPriorityMeta(task.priority);
                     const assignee = task.assigneeId
                       ? memberByUserId.get(task.assigneeId)
                       : undefined;
@@ -300,7 +281,7 @@ export function BoardListView({
                               )}
                             >
                               <Calendar className="h-3.5 w-3.5" aria-hidden="true" />
-                              {formatDueDate(task.dueDate)}
+                              {formatLocalDueDate(task.dueDate)}
                             </span>
                           ) : null}
 

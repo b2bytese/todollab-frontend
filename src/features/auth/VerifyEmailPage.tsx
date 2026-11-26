@@ -78,9 +78,9 @@ export function VerifyEmailPage() {
       toast.success('E-mail verificado com sucesso!');
 
       const pendingInvite =
-        searchParams.get('inviteToken') || getPendingInviteToken();
+        searchParams.get('inviteToken')?.trim() || getPendingInviteToken();
       if (pendingInvite) {
-        navigate(`/invite/${pendingInvite}`, { replace: true });
+        navigate(`/invite/${encodeURIComponent(pendingInvite)}`, { replace: true });
         return;
       }
 
@@ -138,10 +138,13 @@ export function VerifyEmailPage() {
             autoComplete="email"
             placeholder="voce@empresa.com"
             aria-invalid={Boolean(errors.email)}
+            aria-describedby={errors.email ? 'verify-email-error' : undefined}
             {...register('email')}
           />
           {errors.email ? (
-            <p className="text-xs text-destructive">{errors.email.message}</p>
+            <p id="verify-email-error" className="text-xs text-destructive">
+              {errors.email.message}
+            </p>
           ) : null}
         </div>
 
@@ -156,10 +159,13 @@ export function VerifyEmailPage() {
             placeholder="000000"
             className="tracking-[0.25em] font-mono text-center text-base"
             aria-invalid={Boolean(errors.code)}
+            aria-describedby={errors.code ? 'verify-code-error' : undefined}
             {...register('code')}
           />
           {errors.code ? (
-            <p className="text-xs text-destructive">{errors.code.message}</p>
+            <p id="verify-code-error" className="text-xs text-destructive">
+              {errors.code.message}
+            </p>
           ) : null}
         </div>
 

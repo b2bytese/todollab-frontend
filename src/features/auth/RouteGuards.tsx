@@ -39,16 +39,24 @@ export function RequireAuth({ children }: { children?: ReactNode }) {
 export function GuestOnly({ children }: { children?: ReactNode }) {
   const status = useAuthStore((s) => s.status);
   const [searchParams] = useSearchParams();
-  const hasInviteToken = Boolean(
-    searchParams.get('inviteToken') || getPendingInviteToken(),
-  );
+  const inviteToken =
+    searchParams.get('inviteToken')?.trim() || getPendingInviteToken();
 
   if (status === 'loading') {
     return <AuthLoadingScreen />;
   }
 
-  if (status === 'authenticated' && !hasInviteToken) {
-    return <Navigate to="/app/my-tasks" replace />;
+  if (status === 'authenticated') {
+    return (
+      <Navigate
+        to={
+          inviteToken
+            ? `/invite/${encodeURIComponent(inviteToken)}`
+            : '/app/my-tasks'
+        }
+        replace
+      />
+    );
   }
 
   return children ? <>{children}</> : <Outlet />;

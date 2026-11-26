@@ -1,4 +1,3 @@
-import { useQueryClient } from '@tanstack/react-query';
 import {
   CheckSquare,
   ChevronDown,
@@ -120,7 +119,7 @@ function BoardSection({
                     'absolute right-1.5 rounded-md p-1 transition-opacity cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                     board.isFavorite
                       ? 'opacity-100 text-amber-500 hover:text-amber-600'
-                      : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100 text-muted-foreground hover:text-foreground',
+                      : 'opacity-60 sm:opacity-0 sm:group-hover:opacity-100 focus-visible:opacity-100 text-muted-foreground hover:text-foreground',
                   )}
                 >
                   <Star
@@ -147,7 +146,6 @@ export function Sidebar({
   onOpenCreateBoard,
 }: SidebarProps) {
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const user = useAuthStore((s) => s.user);
   const clearSession = useAuthStore((s) => s.clearSession);
 
@@ -175,7 +173,6 @@ export function Sidebar({
       // Clear local session regardless of server logout response.
     } finally {
       clearSession();
-      queryClient.clear();
       useUiStore.getState().setMobileSidebarOpen(false);
       toast.success('Sessão encerrada.');
       navigate('/login', { replace: true });

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Calendar, CheckCircle2, Trash2, X } from 'lucide-react';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { UserAvatar } from '@/components/common/UserAvatar';
@@ -75,12 +75,33 @@ export function TaskDrawer({
   const [descriptionDraft, setDescriptionDraft] = useState('');
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
+  const lastSubmittedTitleRef = useRef<{ taskId: string; value: string } | null>(
+    null,
+  );
+  const lastSubmittedDescriptionRef = useRef<{
+    taskId: string;
+    value: string;
+  } | null>(null);
+
+  const taskId = task?.id;
+  const taskTitle = task?.title;
+  const taskDescription = task?.description ?? '';
+  const hasTask = Boolean(task);
+
   useEffect(() => {
-    if (task) {
-      setTitleDraft(task.title);
-      setDescriptionDraft(task.description ?? '');
+    if (taskId !== undefined && taskTitle !== undefined) {
+      setTitleDraft(taskTitle);
+      setDescriptionDraft(taskDescription);
+      lastSubmittedTitleRef.current = null;
+      lastSubmittedDescriptionRef.current = null;
     }
-  }, [task?.id, task?.title, task?.description]);
+  }, [taskId, taskTitle, taskDescription]);
+
+  useEffect(() => {
+    if (!hasTask && !deleteTaskMutation.isPending) {
+      setConfirmDeleteOpen(false);
+    }
+  }, [hasTask, deleteTaskMutation.isPending]);
 
   const sortedColumns = [...columns].sort((a, b) => a.position - b.position);
 
@@ -93,11 +114,27 @@ export function TaskDrawer({
       setTitleDraft(task.title);
       return;
     }
-    if (trimmed !== task.title) {
-      updateTaskMutation.mutate({
-        taskId: task.id,
-        payload: { title: trimmed },
-      });
+    if (
+      trimmed !== task.title &&
+      !(
+        lastSubmittedTitleRef.current?.taskId === task.id &&
+        lastSubmittedTitleRef.current.value === trimmed
+      )
+    ) {
+      lastSubmittedTitleRef.current = { taskId: task.id, value: trimmed };
+      updateTaskMutation.mutate(
+        {
+          taskId: task.id,
+          payload: { title: trimmed },
+        },
+        {
+          onError: () => {
+            if (lastSubmittedTitleRef.current?.taskId === task.id) {
+              lastSubmittedTitleRef.current = null;
+            }
+          },
+        },
+      );
     }
   };
 
@@ -107,12 +144,36 @@ export function TaskDrawer({
     }
     const trimmed = descriptionDraft.trim();
     const current = task.description ?? '';
-    if (trimmed !== current) {
-      updateTaskMutation.mutate({
-        taskId: task.id,
-        payload: { description: trimmed || null },
-      });
+    if (
+      trimmed !== current &&
+      !(
+        lastSubmittedDescriptionRef.current?.taskId === task.id &&
+        lastSubmittedDescriptionRef.current.value === trimmed
+      )
+    ) {
+      lastSubmittedDescriptionRef.current = { taskId: task.id, value: trimmed };
+      updateTaskMutation.mutate(
+        {
+          taskId: task.id,
+          payload: { description: trimmed || null },
+        },
+        {
+          onError: () => {
+            if (lastSubmittedDescriptionRef.current?.taskId === task.id) {
+              lastSubmittedDescriptionRef.current = null;
+            }
+          },
+        },
+      );
     }
+  };
+
+  const handleSheetOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) {
+      handleTitleCommit();
+      handleDescriptionCommit();
+    }
+    onOpenChange(nextOpen);
   };
 
   const handleConfirmDelete = () => {
@@ -129,7 +190,7 @@ export function TaskDrawer({
 
   return (
     <>
-      <Sheet open={open && Boolean(task)} onOpenChange={onOpenChange}>
+      <Sheet open={open && Boolean(task)} onOpenChange={handleSheetOpenChange}>
         <SheetContent
           side="right"
           className="w-full sm:max-w-xl overflow-y-auto gap-5 p-6"

@@ -32,6 +32,7 @@ import {
   clearPendingInviteToken,
   getPendingInviteToken,
   setPendingInviteToken,
+  shouldAutoAcceptPendingInvite,
 } from '@/lib/pendingInvite';
 import { useAuthStore } from '@/stores/authStore';
 
@@ -68,7 +69,7 @@ export function InviteAcceptPage() {
     if (
       authStatus === 'authenticated' &&
       preview?.valid &&
-      getPendingInviteToken() === token &&
+      shouldAutoAcceptPendingInvite(token) &&
       autoAcceptTriggeredRef.current !== token &&
       !isAcceptPending
     ) {
@@ -142,7 +143,7 @@ export function InviteAcceptPage() {
     if (!token) {
       return;
     }
-    setPendingInviteToken(token);
+    setPendingInviteToken(token, { autoAccept: true });
     navigate(`/signup?inviteToken=${encodeURIComponent(token)}`);
   };
 
@@ -150,7 +151,7 @@ export function InviteAcceptPage() {
     if (!token) {
       return;
     }
-    setPendingInviteToken(token);
+    setPendingInviteToken(token, { autoAccept: true });
     navigate(`/login?inviteToken=${encodeURIComponent(token)}`);
   };
 
@@ -188,7 +189,7 @@ export function InviteAcceptPage() {
               <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10 text-destructive">
                 <AlertCircle className="h-6 w-6" aria-hidden="true" />
               </div>
-              <CardTitle>Convite inválido ou expirado</CardTitle>
+              <CardTitle as="h1">Convite inválido ou expirado</CardTitle>
               <CardDescription>
                 {preview?.reason ??
                   (previewQuery.error
@@ -221,7 +222,7 @@ export function InviteAcceptPage() {
                 <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                   Convite para quadro
                 </p>
-                <CardTitle className="text-xl">{preview.boardName}</CardTitle>
+                <CardTitle as="h1" className="text-xl">{preview.boardName}</CardTitle>
                 <CardDescription>
                   <strong>{preview.inviterName}</strong> convidou você para
                   colaborar neste quadro como{' '}

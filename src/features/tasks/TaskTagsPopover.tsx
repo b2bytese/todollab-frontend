@@ -1,5 +1,5 @@
-import { useState, type FormEvent } from 'react';
-import { Check, Loader2, Plus, Tag } from 'lucide-react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { Check, Loader2, Pencil, Plus, Tag, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -7,7 +7,11 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
-import { useCreateTagMutation } from '@/features/tasks/api';
+import {
+  useCreateTagMutation,
+  useDeleteTagMutation,
+  useUpdateTagMutation,
+} from '@/features/tasks/api';
 import { TAG_COLORS } from '@/lib/avatarColors';
 import { cn } from '@/lib/utils';
 import type { BoardTag } from '@/types/api';
@@ -30,10 +34,28 @@ export function TaskTagsPopover({
   const [open, setOpen] = useState(false);
   const [newName, setNewName] = useState('');
   const [newColor, setNewColor] = useState<string>(TAG_COLORS[1]);
+  const [editingTagId, setEditingTagId] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editColor, setEditColor] = useState<string>(TAG_COLORS[0]);
+
   const createTagMutation = useCreateTagMutation(boardId);
+  const updateTagMutation = useUpdateTagMutation(boardId);
+  const deleteTagMutation = useDeleteTagMutation(boardId);
+
+  const selectedTagIdsRef = useRef(selectedTagIds);
+  useEffect(() => {
+    selectedTagIdsRef.current = selectedTagIds;
+  }, [selectedTagIds]);
 
   const selectedSet = new Set(selectedTagIds);
   const selectedTags = boardTags.filter((tag) => selectedSet.has(tag.id));
+
+  const handlePopoverOpenChange = (nextOpen: boolean) => {
+    setOpen(nextOpen);
+    if (!nextOpen) {
+      setEditingTagId(null);
+    }
+  };
 
   const handleToggleTag = (tagId: string) => {
     if (!canEdit) {
@@ -60,10 +82,61 @@ export function TaskTagsPopover({
       {
         onSuccess: (created) => {
           setNewName('');
-          onChangeTagIds([...selectedTagIds, created.id]);
+          const latestSelected = selectedTagIdsRef.current;
+          if (!latestSelected.includes(created.id)) {
+            onChangeTagIds([...latestSelected, created.id]);
+          }
         },
       },
     );
+  };
+
+  const startEditingTag = (tag: BoardTag) => {
+    setEditingTagId(tag.id);
+    setEditName(tag.name);
+    setEditColor(tag.color);
+  };
+
+  const handleSaveEditTag = (
+    event: FormEvent<HTMLFormElement>,
+    tag: BoardTag,
+  ) => {
+    event.preventDefault();
+    const trimmed = editName.trim();
+    if (!trimmed || !canEdit || updateTagMutation.isPending) {
+      return;
+    }
+    if (trimmed === tag.name && editColor === tag.color) {
+      setEditingTagId(null);
+      return;
+    }
+    updateTagMutation.mutate(
+      {
+        tagId: tag.id,
+        payload: {
+          name: trimmed,
+          color: editColor,
+        },
+      },
+      {
+        onSuccess: () => {
+          setEditingTagId(null);
+        },
+      },
+    );
+  };
+
+  const handleDeleteTag = (tagId: string) => {
+    if (!canEdit || deleteTagMutation.isPending) {
+      return;
+    }
+    deleteTagMutation.mutate(tagId, {
+      onSuccess: () => {
+        if (editingTagId === tagId) {
+          setEditingTagId(null);
+        }
+      },
+    });
   };
 
   return (
@@ -95,7 +168,7 @@ export function TaskTagsPopover({
         ) : null}
 
         {canEdit ? (
-          <Popover open={open} onOpenChange={setOpen}>
+          <Popover open={open} onOpenChange={handlePopoverOpenChange}>
             <PopoverTrigger asChild>
               <Button
                 type="button"
@@ -121,34 +194,145 @@ export function TaskTagsPopover({
                   <div className="max-h-44 space-y-1 overflow-y-auto pr-1">
                     {boardTags.map((tag) => {
                       const active = selectedSet.has(tag.id);
+                      const isEditing = editingTagId === tag.id;
+
+                      if (isEditing) {
+                        return (
+                          <form
+                            key={tag.id}
+                            onSubmit={(e) => handleSaveEditTag(e, tag)}
+                            className="space-y-2 rounded-lg border border-border bg-background/80 p-2"
+                          >
+                            <div className="flex items-center gap-1">
+                              <Input
+                                autoFocus
+                                value={editName}
+                                onChange={(e) => setEditName(e.target.value)}
+                                placeholder="Nome da etiqueta..."
+                                aria-label={`Editar nome da etiqueta ${tag.name}`}
+                                maxLength={40}
+                                className="h-7 flex-1 text-xs"
+                                disabled={updateTagMutation.isPending}
+                              />
+                              <Button
+                                type="submit"
+                                size="icon"
+                                variant="coral"
+                                className="h-7 w-7 shrink-0"
+                                disabled={
+                                  !editName.trim() || updateTagMutation.isPending
+                                }
+                                aria-label="Salvar etiqueta"
+                              >
+                                {updateTagMutation.isPending ? (
+                                  <Loader2
+                                    className="h-3 w-3 animate-spin"
+                                    aria-hidden="true"
+                                  />
+                                ) : (
+                                  <Check className="h-3 w-3" aria-hidden="true" />
+                                )}
+                              </Button>
+                              <Button
+                                type="button"
+                                size="icon"
+                                variant="ghost"
+                                className="h-7 w-7 shrink-0"
+                                onClick={() => setEditingTagId(null)}
+                                aria-label="Cancelar edição"
+                              >
+                                <X className="h-3 w-3" aria-hidden="true" />
+                              </Button>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {TAG_COLORS.map((color) => {
+                                const colorActive = editColor === color;
+                                return (
+                                  <button
+                                    key={color}
+                                    type="button"
+                                    aria-label={`Editar cor da etiqueta ${color}`}
+                                    aria-pressed={colorActive}
+                                    onClick={() => setEditColor(color)}
+                                    style={{ backgroundColor: color }}
+                                    className={cn(
+                                      'flex h-4 w-4 items-center justify-center rounded-full cursor-pointer transition-transform',
+                                      colorActive
+                                        ? 'scale-110 ring-2 ring-foreground ring-offset-1 ring-offset-popover'
+                                        : 'hover:scale-105',
+                                    )}
+                                  >
+                                    {colorActive ? (
+                                      <Check
+                                        className="h-2.5 w-2.5 text-white"
+                                        aria-hidden="true"
+                                      />
+                                    ) : null}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </form>
+                        );
+                      }
+
                       return (
-                        <button
+                        <div
                           key={tag.id}
-                          type="button"
-                          onClick={() => handleToggleTag(tag.id)}
-                          aria-pressed={active}
-                          className={cn(
-                            'flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs transition-colors cursor-pointer',
-                            active
-                              ? 'bg-accent text-foreground font-medium'
-                              : 'hover:bg-accent/60 text-foreground',
-                          )}
+                          className="group flex items-center gap-1"
                         >
-                          <span className="flex items-center gap-2 min-w-0">
-                            <span
-                              aria-hidden="true"
-                              style={{ backgroundColor: tag.color }}
-                              className="h-2.5 w-2.5 shrink-0 rounded-full"
-                            />
-                            <span className="truncate">{tag.name}</span>
-                          </span>
-                          {active ? (
-                            <Check
-                              className="h-3.5 w-3.5 shrink-0 text-brand-coral"
-                              aria-hidden="true"
-                            />
-                          ) : null}
-                        </button>
+                          <button
+                            type="button"
+                            onClick={() => handleToggleTag(tag.id)}
+                            aria-pressed={active}
+                            className={cn(
+                              'flex flex-1 min-w-0 items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs transition-colors cursor-pointer',
+                              active
+                                ? 'bg-accent text-foreground font-medium'
+                                : 'hover:bg-accent/60 text-foreground',
+                            )}
+                          >
+                            <span className="flex items-center gap-2 min-w-0">
+                              <span
+                                aria-hidden="true"
+                                style={{ backgroundColor: tag.color }}
+                                className="h-2.5 w-2.5 shrink-0 rounded-full"
+                              />
+                              <span className="truncate">{tag.name}</span>
+                            </span>
+                            {active ? (
+                              <Check
+                                className="h-3.5 w-3.5 shrink-0 text-brand-coral"
+                                aria-hidden="true"
+                              />
+                            ) : null}
+                          </button>
+
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
+                            aria-label={`Editar etiqueta ${tag.name}`}
+                            title="Editar etiqueta"
+                            onClick={() => startEditingTag(tag)}
+                          >
+                            <Pencil className="h-3 w-3" aria-hidden="true" />
+                          </Button>
+
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 shrink-0 text-muted-foreground hover:text-destructive"
+                            aria-label={`Excluir etiqueta ${tag.name}`}
+                            title="Excluir etiqueta"
+                            disabled={deleteTagMutation.isPending}
+                            onClick={() => handleDeleteTag(tag.id)}
+                          >
+                            <Trash2 className="h-3 w-3" aria-hidden="true" />
+                          </Button>
+                        </div>
                       );
                     })}
                   </div>
