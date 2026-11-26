@@ -1,5 +1,4 @@
 import { RotateCcw, Search } from 'lucide-react';
-import { type BadgeProps } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
@@ -34,15 +33,7 @@ export const DEFAULT_BOARD_FILTERS: BoardFilters = {
   hideCompleted: false,
 };
 
-export const PRIORITY_META: Record<
-  TaskPriority,
-  { label: string; variant: BadgeProps['variant'] }
-> = {
-  URGENT: { label: 'Urgente', variant: 'coral' },
-  HIGH: { label: 'Alta', variant: 'warning' },
-  MEDIUM: { label: 'Média', variant: 'secondary' },
-  LOW: { label: 'Baixa', variant: 'outline' },
-};
+export { getPriorityMeta, PRIORITY_META } from '@/lib/taskMeta';
 
 export function hasActiveBoardFilters(filters: BoardFilters): boolean {
   return (

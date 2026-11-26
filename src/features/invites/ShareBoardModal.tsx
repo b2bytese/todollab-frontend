@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import {
   Check,
   Copy,
@@ -97,6 +97,15 @@ export function ShareBoardModal({
     null,
   );
   const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<'members' | 'email' | 'links'>(
+    'members',
+  );
+
+  useEffect(() => {
+    if (!open || !isOwner) {
+      setActiveTab('members');
+    }
+  }, [open, isOwner]);
 
   const invites = invitesQuery.data ?? [];
   const emailInvites = invites.filter((inv) => inv.type === 'EMAIL');
@@ -229,7 +238,12 @@ export function ShareBoardModal({
             </DialogDescription>
           </DialogHeader>
 
-          <Tabs defaultValue="members">
+          <Tabs
+            value={isOwner ? activeTab : 'members'}
+            onValueChange={(value) =>
+              setActiveTab(value as 'members' | 'email' | 'links')
+            }
+          >
             <TabsList
               className={
                 isOwner

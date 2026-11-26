@@ -4,17 +4,20 @@ import {
   type AxiosAdapter,
   type InternalAxiosRequestConfig,
 } from 'axios';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { toast } from 'sonner';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ThemeProvider } from '@/components/common/ThemeProvider';
+import { boardKeys } from '@/features/boards/api';
+import * as BoardListViewModule from '@/features/boards/BoardListView';
 import { BoardPage } from '@/features/boards/BoardPage';
+import { TaskTagsPopover } from '@/features/tasks/TaskTagsPopover';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/stores/authStore';
-import type { BoardDetail, BoardRole, UserProfile } from '@/types/api';
+import type { BoardDetail, BoardRole, BoardTag, UserProfile } from '@/types/api';
 
 const mockUser: UserProfile = {
   id: 'user-1',
@@ -181,6 +184,15 @@ function makeAxiosError(
   );
 }
 
+function LocationDisplay() {
+  const location = useLocation();
+  return (
+    <div data-testid="location-display">
+      {`${location.pathname}${location.search}`}
+    </div>
+  );
+}
+
 function renderBoardPage(initialEntry = '/app/boards/board-1') {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -189,17 +201,20 @@ function renderBoardPage(initialEntry = '/app/boards/board-1') {
     },
   });
 
-  return render(
+  const result = render(
     <QueryClientProvider client={queryClient}>
       <ThemeProvider defaultTheme="light">
         <MemoryRouter initialEntries={[initialEntry]}>
           <Routes>
             <Route path="/app/boards/:boardId" element={<BoardPage />} />
           </Routes>
+          <LocationDisplay />
         </MemoryRouter>
       </ThemeProvider>
     </QueryClientProvider>,
   );
+
+  return { ...result, queryClient };
 }
 
 describe('BoardPage List View & TaskDrawer', () => {
@@ -684,5 +699,486 @@ describe('BoardPage List View & TaskDrawer', () => {
     } finally {
       process.off('unhandledRejection', onUnhandled);
     }
+  });
+
+  it('boardPageOpensDirectlyInKanbanWithoutFlashingBoardListView', async () => {
+    const detail = createBoardDetail('OWNER');
+    detail.board.defaultView = 'KANBAN';
+    const listViewSpy = vi.spyOn(BoardListViewModule, 'BoardListView');
+
+    api.defaults.adapter = async (config) => {
+      if (
+        config.method?.toLowerCase() === 'get' &&
+        config.url === '/api/v1/boards/board-1'
+      ) {
+        return {
+          status: 200,
+          statusText: 'OK',
+          headers: new AxiosHeaders(),
+          config,
+          data: detail,
+        };
+      }
+      throw new Error(`Unexpected request: ${config.method} ${config.url}`);
+    };
+
+    renderBoardPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Produto V1')).toBeInTheDocument();
+      expect(screen.getByTestId('kanban-card-task-1')).toBeInTheDocument();
+    });
+
+    expect(
+      screen.getByRole('button', { name: /kanban/i }),
+    ).toHaveAttribute('aria-pressed', 'true');
+    expect(listViewSpy).not.toHaveBeenCalled();
+  });
+
+  it('boardPageClearsTaskQueryParamWhenSelectedTaskIsRemovedRemotely', async () => {
+    const detail = createBoardDetail('OWNER');
+
+    api.defaults.adapter = async (config) => {
+      if (
+        config.method?.toLowerCase() === 'get' &&
+        config.url === '/api/v1/boards/board-1'
+      ) {
+        return {
+          status: 200,
+          statusText: 'OK',
+          headers: new AxiosHeaders(),
+          config,
+          data: detail,
+        };
+      }
+      throw new Error(`Unexpected request: ${config.method} ${config.url}`);
+    };
+
+    const { queryClient } = renderBoardPage('/app/boards/board-1?task=task-1');
+
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByLabelText(/título da tarefa/i)).toHaveValue(
+      'Corrigir login OAuth',
+    );
+    expect(screen.getByTestId('location-display')).toHaveTextContent(
+      '/app/boards/board-1?task=task-1',
+    );
+
+    act(() => {
+      queryClient.setQueryData<BoardDetail>(boardKeys.detail('board-1'), {
+        ...detail,
+        tasks: detail.tasks.filter((t) => t.id !== 'task-1'),
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(screen.getByTestId('location-display')).toHaveTextContent(
+        '/app/boards/board-1',
+      );
+      expect(screen.getByTestId('location-display').textContent).toBe(
+        '/app/boards/board-1',
+      );
+    });
+  });
+
+  it('boardPageResetsAssigneeAndTagFiltersWhenMemberOrTagDisappears', async () => {
+    const user = userEvent.setup();
+    const detail = createBoardDetail('OWNER');
+
+    api.defaults.adapter = async (config) => {
+      if (
+        config.method?.toLowerCase() === 'get' &&
+        config.url === '/api/v1/boards/board-1'
+      ) {
+        return {
+          status: 200,
+          statusText: 'OK',
+          headers: new AxiosHeaders(),
+          config,
+          data: detail,
+        };
+      }
+      throw new Error(`Unexpected request: ${config.method} ${config.url}`);
+    };
+
+    const { queryClient } = renderBoardPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Corrigir login OAuth')).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByLabelText(/filtrar por responsável/i));
+    await user.click(await screen.findByRole('option', { name: 'Bruno Costa' }));
+    await user.click(screen.getByLabelText(/filtrar por etiqueta/i));
+    await user.click(await screen.findByRole('option', { name: 'UI' }));
+
+    expect(screen.getByText('Refinar layout da barra lateral')).toBeInTheDocument();
+    expect(screen.queryByText('Corrigir login OAuth')).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /limpar filtros/i }),
+    ).toBeInTheDocument();
+
+    act(() => {
+      queryClient.setQueryData<BoardDetail>(boardKeys.detail('board-1'), {
+        ...detail,
+        members: detail.members.filter((m) => m.userId !== 'user-2'),
+        tags: detail.tags.filter((t) => t.id !== 'tag-ui'),
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Corrigir login OAuth')).toBeInTheDocument();
+      expect(
+        screen.getByText('Refinar layout da barra lateral'),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: /limpar filtros/i }),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it('taskDrawerFlushesPendingTitleAndDescriptionOnCloseWithoutPriorBlurAndSupportsDelete', async () => {
+    const user = userEvent.setup();
+    let detail = createBoardDetail('OWNER');
+    const requests: { method: string; url: string; data: unknown }[] = [];
+
+    api.defaults.adapter = async (config) => {
+      const method = config.method?.toLowerCase() ?? 'get';
+      const url = config.url ?? '';
+      const data =
+        typeof config.data === 'string' && config.data.length > 0
+          ? JSON.parse(config.data)
+          : config.data;
+
+      if (method === 'get' && url === '/api/v1/boards/board-1') {
+        return {
+          status: 200,
+          statusText: 'OK',
+          headers: new AxiosHeaders(),
+          config,
+          data: detail,
+        };
+      }
+
+      requests.push({ method, url, data });
+
+      if (method === 'patch' && url === '/api/v1/boards/board-1/tasks/task-1') {
+        const patch = data as { title?: string; description?: string | null };
+        detail = {
+          ...detail,
+          tasks: detail.tasks.map((t) =>
+            t.id === 'task-1'
+              ? {
+                  ...t,
+                  title: patch.title ?? t.title,
+                  description:
+                    patch.description !== undefined
+                      ? patch.description
+                      : t.description,
+                }
+              : t,
+          ),
+        };
+        return {
+          status: 200,
+          statusText: 'OK',
+          headers: new AxiosHeaders(),
+          config,
+          data: detail.tasks[0],
+        };
+      }
+
+      if (method === 'delete' && url === '/api/v1/boards/board-1/tasks/task-1') {
+        detail = {
+          ...detail,
+          tasks: detail.tasks.filter((t) => t.id !== 'task-1'),
+        };
+        return {
+          status: 204,
+          statusText: 'No Content',
+          headers: new AxiosHeaders(),
+          config,
+          data: null,
+        };
+      }
+
+      throw new Error(`Unexpected request: ${method} ${url}`);
+    };
+
+    renderBoardPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Corrigir login OAuth')).toBeInTheDocument();
+    });
+
+    // 1. Edit title and press Escape immediately without prior blur
+    await user.click(screen.getByRole('button', { name: /corrigir login oauth/i }));
+    let dialog = await screen.findByRole('dialog');
+    const titleInput = within(dialog).getByLabelText(/título da tarefa/i);
+    await user.clear(titleInput);
+    await user.type(titleInput, 'Título salvo ao fechar{Escape}');
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(
+        requests.some(
+          (r) =>
+            r.method === 'patch' &&
+            r.url === '/api/v1/boards/board-1/tasks/task-1' &&
+            (r.data as { title?: string }).title === 'Título salvo ao fechar',
+        ),
+      ).toBe(true);
+    });
+
+    // 2. Reopen, edit description, and press Escape without prior blur
+    await user.click(
+      screen.getByRole('button', { name: /título salvo ao fechar/i }),
+    );
+    dialog = await screen.findByRole('dialog');
+    const descInput = within(dialog).getByLabelText(/descrição/i);
+    await user.clear(descInput);
+    await user.type(descInput, 'Descrição salva ao fechar{Escape}');
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(
+        requests.some(
+          (r) =>
+            r.method === 'patch' &&
+            r.url === '/api/v1/boards/board-1/tasks/task-1' &&
+            (r.data as { description?: string | null }).description ===
+              'Descrição salva ao fechar',
+        ),
+      ).toBe(true);
+    });
+
+    // 3. Reopen and delete via ConfirmDialog
+    await user.click(
+      screen.getByRole('button', { name: /título salvo ao fechar/i }),
+    );
+    dialog = await screen.findByRole('dialog');
+    await user.click(
+      within(dialog).getByRole('button', { name: /excluir tarefa/i }),
+    );
+
+    const confirmDialog = await screen.findByRole('dialog', {
+      name: /excluir tarefa\?/i,
+    });
+    expect(
+      requests.some((r) => r.method === 'delete'),
+    ).toBe(false);
+
+    await user.click(
+      within(confirmDialog).getByRole('button', { name: /^excluir$/i }),
+    );
+
+    await waitFor(() => {
+      expect(
+        requests.some(
+          (r) =>
+            r.method === 'delete' &&
+            r.url === '/api/v1/boards/board-1/tasks/task-1',
+        ),
+      ).toBe(true);
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(
+        screen.queryByText('Título salvo ao fechar'),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it('taskTagsPopoverCreatesEditsDeletesTagsAndUsesLatestSelectedTagIdsOnCreate', async () => {
+    const user = userEvent.setup();
+    const detail = createBoardDetail('OWNER');
+    const onChangeCalls: string[][] = [];
+
+    let resolveCreateTag!: (tag: BoardTag) => void;
+    const requests: { method: string; url: string; data: unknown }[] = [];
+
+    api.defaults.adapter = async (config) => {
+      const method = config.method?.toLowerCase() ?? 'get';
+      const url = config.url ?? '';
+      const data =
+        typeof config.data === 'string' && config.data.length > 0
+          ? JSON.parse(config.data)
+          : config.data;
+
+      requests.push({ method, url, data });
+
+      if (method === 'post' && url === '/api/v1/boards/board-1/tags') {
+        const payload = data as { name: string; color: string };
+        return new Promise((resolve) => {
+          resolveCreateTag = (tag: BoardTag) =>
+            resolve({
+              status: 201,
+              statusText: 'Created',
+              headers: new AxiosHeaders(),
+              config,
+              data: tag ?? {
+                id: 'tag-new',
+                boardId: 'board-1',
+                name: payload.name,
+                color: payload.color,
+              },
+            });
+        });
+      }
+
+      if (method === 'patch' && url === '/api/v1/boards/board-1/tags/tag-ui') {
+        const payload = data as { name?: string; color?: string };
+        return {
+          status: 200,
+          statusText: 'OK',
+          headers: new AxiosHeaders(),
+          config,
+          data: {
+            id: 'tag-ui',
+            boardId: 'board-1',
+            name: payload.name ?? 'UI',
+            color: payload.color ?? '#2563EB',
+          },
+        };
+      }
+
+      if (method === 'delete' && url === '/api/v1/boards/board-1/tags/tag-ui') {
+        return {
+          status: 204,
+          statusText: 'No Content',
+          headers: new AxiosHeaders(),
+          config,
+          data: null,
+        };
+      }
+
+      throw new Error(`Unexpected request: ${method} ${url}`);
+    };
+
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    });
+    queryClient.setQueryData(boardKeys.detail('board-1'), detail);
+
+    function Harness() {
+      const { data } = useQuery<BoardDetail>({
+        queryKey: boardKeys.detail('board-1'),
+        queryFn: () => detail,
+        enabled: false,
+      });
+      const current = data ?? detail;
+      const task = current.tasks[0];
+
+      return (
+        <TaskTagsPopover
+          boardId="board-1"
+          boardTags={current.tags}
+          selectedTagIds={task.tagIds}
+          canEdit
+          onChangeTagIds={(nextTagIds) => {
+            onChangeCalls.push(nextTagIds);
+            queryClient.setQueryData<BoardDetail>(
+              boardKeys.detail('board-1'),
+              (prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      tasks: prev.tasks.map((t) =>
+                        t.id === task.id ? { ...t, tagIds: nextTagIds } : t,
+                      ),
+                    }
+                  : prev,
+            );
+          }}
+        />
+      );
+    }
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ThemeProvider defaultTheme="light">
+          <Harness />
+        </ThemeProvider>
+      </QueryClientProvider>,
+    );
+
+    await user.click(screen.getByRole('button', { name: /gerenciar etiquetas/i }));
+
+    // 1. Start creating a tag while selectedTagIds is ['tag-bug']
+    await user.type(screen.getByLabelText(/nome da nova etiqueta/i), 'Backend');
+    await user.click(screen.getByRole('button', { name: /criar etiqueta/i }));
+
+    await waitFor(() => {
+      expect(typeof resolveCreateTag).toBe('function');
+    });
+
+    // While createTag is in-flight, toggle 'UI' tag on -> selectedTagIds becomes ['tag-bug', 'tag-ui']
+    await user.click(screen.getByRole('button', { name: 'UI' }));
+    expect(onChangeCalls[onChangeCalls.length - 1]).toEqual([
+      'tag-bug',
+      'tag-ui',
+    ]);
+
+    // Now resolve createTag -> must use latest selectedTagIds ['tag-bug', 'tag-ui'] + 'tag-backend'
+    act(() => {
+      resolveCreateTag({
+        id: 'tag-backend',
+        boardId: 'board-1',
+        name: 'Backend',
+        color: '#FF4B4B',
+      });
+    });
+
+    await waitFor(() => {
+      expect(onChangeCalls[onChangeCalls.length - 1]).toEqual([
+        'tag-bug',
+        'tag-ui',
+        'tag-backend',
+      ]);
+      expect(screen.getByRole('button', { name: 'Backend' })).toBeInTheDocument();
+    });
+
+    // 2. Edit 'UI' tag inline (name + color)
+    await user.click(screen.getByRole('button', { name: /editar etiqueta ui/i }));
+    const editInput = screen.getByLabelText(/editar nome da etiqueta ui/i);
+    await user.clear(editInput);
+    await user.type(editInput, 'Design');
+    await user.click(
+      screen.getByRole('button', { name: /editar cor da etiqueta #16A34A/i }),
+    );
+    await user.click(screen.getByRole('button', { name: /salvar etiqueta/i }));
+
+    await waitFor(() => {
+      expect(
+        requests.some(
+          (r) =>
+            r.method === 'patch' &&
+            r.url === '/api/v1/boards/board-1/tags/tag-ui' &&
+            (r.data as { name?: string; color?: string }).name === 'Design' &&
+            (r.data as { name?: string; color?: string }).color === '#16A34A',
+        ),
+      ).toBe(true);
+      expect(screen.getByRole('button', { name: 'Design' })).toBeInTheDocument();
+    });
+
+    // 3. Delete 'Design' tag
+    await user.click(
+      screen.getByRole('button', { name: /excluir etiqueta design/i }),
+    );
+
+    await waitFor(() => {
+      expect(
+        requests.some(
+          (r) =>
+            r.method === 'delete' &&
+            r.url === '/api/v1/boards/board-1/tags/tag-ui',
+        ),
+      ).toBe(true);
+      expect(
+        screen.queryByRole('button', { name: 'Design' }),
+      ).not.toBeInTheDocument();
+    });
   });
 });

@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import {
   ArrowDown,
   ArrowUp,
@@ -23,13 +23,6 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
@@ -42,7 +35,12 @@ import {
   useUpdateColumnMutation,
 } from '@/features/boards/api';
 import { BOARD_ICON_OPTIONS } from '@/features/boards/boardIcons';
+import {
+  ColumnDeleteDialog,
+  type ColumnDeleteChoice,
+} from '@/features/boards/ColumnDeleteDialog';
 import { BOARD_COLORS } from '@/lib/avatarColors';
+import { calculateDropPosition } from '@/lib/fractionalIndex';
 import { cn } from '@/lib/utils';
 import type { BoardColumn, BoardDetail, BoardView } from '@/types/api';
 
@@ -83,11 +81,30 @@ export function BoardSettingsDialog({
   const [newColumnName, setNewColumnName] = useState('');
   const [newColumnIsDone, setNewColumnIsDone] = useState(false);
   const [columnEdits, setColumnEdits] = useState<Record<string, string>>({});
-  const [columnToDelete, setColumnToDelete] = useState<BoardColumn | null>(null);
-  const [migrateTargetId, setMigrateTargetId] = useState<string>('');
+  const [activeTab, setActiveTab] = useState<'general' | 'columns'>(
+    isOwner ? 'general' : 'columns',
+  );
+  const [deleteTarget, setDeleteTarget] = useState<{
+    column: BoardColumn;
+    taskCount: number;
+  } | null>(null);
+
+  const prevOpenRef = useRef(false);
+  const prevBoardIdRef = useRef(detail.board.id);
 
   useEffect(() => {
-    if (open) {
+    const wasOpen = prevOpenRef.current;
+    const prevBoardId = prevBoardIdRef.current;
+    prevOpenRef.current = open;
+    prevBoardIdRef.current = detail.board.id;
+
+    if (!open) {
+      setConfirmDeleteBoardOpen(false);
+      setDeleteTarget(null);
+      return;
+    }
+
+    if (!wasOpen || prevBoardId !== detail.board.id) {
       setName(detail.board.name);
       setDescription(detail.board.description ?? '');
       setColor(detail.board.color);
@@ -98,8 +115,17 @@ export function BoardSettingsDialog({
         map[col.id] = col.name;
       }
       setColumnEdits(map);
+      setNewColumnName('');
+      setNewColumnIsDone(false);
+      setActiveTab(isOwner ? 'general' : 'columns');
     }
-  }, [open, detail.board, detail.columns]);
+  }, [open, detail.board, detail.columns, isOwner]);
+
+  useEffect(() => {
+    if (!isOwner && activeTab === 'general') {
+      setActiveTab('columns');
+    }
+  }, [isOwner, activeTab]);
 
   const sortedColumns = [...detail.columns].sort(
     (a, b) => a.position - b.position,
@@ -172,19 +198,7 @@ export function BoardSettingsDialog({
     }
     const moving = sortedColumns[index];
     const withoutMoving = sortedColumns.filter((c) => c.id !== moving.id);
-    const prevCol = withoutMoving[targetIndex - 1];
-    const nextCol = withoutMoving[targetIndex];
-
-    let newPosition: number;
-    if (!prevCol && nextCol) {
-      newPosition = nextCol.position / 2;
-    } else if (prevCol && !nextCol) {
-      newPosition = prevCol.position + 1000;
-    } else if (prevCol && nextCol) {
-      newPosition = (prevCol.position + nextCol.position) / 2;
-    } else {
-      newPosition = 1000;
-    }
+    const newPosition = calculateDropPosition(withoutMoving, targetIndex);
 
     moveColumnMutation.mutate({
       columnId: moving.id,
@@ -194,31 +208,45 @@ export function BoardSettingsDialog({
 
   const openDeleteColumnModal = (column: BoardColumn) => {
     const taskCount = detail.tasks.filter((t) => t.columnId === column.id).length;
-    if (taskCount === 0) {
-      deleteColumnMutation.mutate({ columnId: column.id });
-      return;
-    }
-    const fallbackTarget = sortedColumns.find((c) => c.id !== column.id);
-    setMigrateTargetId(fallbackTarget?.id ?? '__DELETE_TASKS__');
-    setColumnToDelete(column);
+    setDeleteTarget({ column, taskCount });
   };
 
-  const handleConfirmDeleteColumn = () => {
-    if (!columnToDelete) {
+  const handleConfirmEmptyDelete = () => {
+    if (!deleteTarget) {
       return;
     }
-    const payload =
-      migrateTargetId === '__DELETE_TASKS__'
-        ? { columnId: columnToDelete.id, deleteTasks: true }
-        : { columnId: columnToDelete.id, targetColumnId: migrateTargetId };
-
-    deleteColumnMutation.mutate(payload, {
-      onSuccess: () => {
-        setColumnToDelete(null);
-        toast.success('Coluna removida.');
+    deleteColumnMutation.mutate(
+      { columnId: deleteTarget.column.id },
+      {
+        onSuccess: () => {
+          setDeleteTarget(null);
+          toast.success('Coluna removida.');
+        },
       },
-    });
+    );
   };
+
+  const handleConfirmDeleteWithTasks = (choice: ColumnDeleteChoice) => {
+    if (!deleteTarget) {
+      return;
+    }
+    deleteColumnMutation.mutate(
+      {
+        columnId: deleteTarget.column.id,
+        ...choice,
+      },
+      {
+        onSuccess: () => {
+          setDeleteTarget(null);
+          toast.success('Coluna removida.');
+        },
+      },
+    );
+  };
+
+  const otherColumnsForDelete = deleteTarget
+    ? sortedColumns.filter((c) => c.id !== deleteTarget.column.id)
+    : [];
 
   return (
     <>
@@ -231,7 +259,12 @@ export function BoardSettingsDialog({
             </DialogDescription>
           </DialogHeader>
 
-          <Tabs defaultValue={isOwner ? 'general' : 'columns'}>
+          <Tabs
+            value={activeTab}
+            onValueChange={(value) =>
+              setActiveTab(value as 'general' | 'columns')
+            }
+          >
             <TabsList className="grid w-full grid-cols-2">
               <TabsTrigger value="general" disabled={!isOwner}>
                 Geral
@@ -253,7 +286,7 @@ export function BoardSettingsDialog({
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     disabled={!isOwner || updateBoardMutation.isPending}
-                    maxLength={120}
+                    maxLength={80}
                   />
                 </div>
 
@@ -427,7 +460,14 @@ export function BoardSettingsDialog({
                         }
                         onBlur={() => {
                           const trimmed = draftName.trim();
-                          if (trimmed && trimmed !== column.name) {
+                          if (!trimmed) {
+                            setColumnEdits((prev) => ({
+                              ...prev,
+                              [column.id]: column.name,
+                            }));
+                            return;
+                          }
+                          if (trimmed !== column.name) {
                             updateColumnMutation.mutate({
                               columnId: column.id,
                               payload: { name: trimmed },
@@ -566,65 +606,34 @@ export function BoardSettingsDialog({
         onConfirm={handleDeleteBoard}
       />
 
-      <Dialog
-        open={Boolean(columnToDelete)}
+      <ConfirmDialog
+        open={Boolean(deleteTarget && deleteTarget.taskCount === 0)}
         onOpenChange={(nextOpen) => {
           if (!nextOpen) {
-            setColumnToDelete(null);
+            setDeleteTarget(null);
           }
         }}
-      >
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Excluir coluna com tarefas</DialogTitle>
-            <DialogDescription>
-              A coluna &quot;{columnToDelete?.name}&quot; possui tarefas. Escolha
-              para qual coluna movê-las ou exclua todas.
-            </DialogDescription>
-          </DialogHeader>
+        title="Excluir coluna?"
+        description={`Tem certeza que deseja excluir a coluna "${deleteTarget?.column.name ?? ''}"?`}
+        confirmLabel="Excluir coluna"
+        destructive
+        loading={deleteColumnMutation.isPending}
+        onConfirm={handleConfirmEmptyDelete}
+      />
 
-          <div className="space-y-2">
-            <Label htmlFor="migrate-target-column">Destino das tarefas</Label>
-            <Select value={migrateTargetId} onValueChange={setMigrateTargetId}>
-              <SelectTrigger id="migrate-target-column">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {sortedColumns
-                  .filter((c) => c.id !== columnToDelete?.id)
-                  .map((col) => (
-                    <SelectItem key={col.id} value={col.id}>
-                      Mover para: {col.name}
-                    </SelectItem>
-                  ))}
-                <SelectItem value="__DELETE_TASKS__">
-                  Excluir todas as tarefas da coluna
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="flex justify-end gap-2 pt-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setColumnToDelete(null)}
-            >
-              Cancelar
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              disabled={deleteColumnMutation.isPending}
-              onClick={handleConfirmDeleteColumn}
-            >
-              {deleteColumnMutation.isPending
-                ? 'Processando...'
-                : 'Confirmar exclusão'}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <ColumnDeleteDialog
+        open={Boolean(deleteTarget && deleteTarget.taskCount > 0)}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) {
+            setDeleteTarget(null);
+          }
+        }}
+        column={deleteTarget?.column ?? null}
+        otherColumns={otherColumnsForDelete}
+        taskCount={deleteTarget?.taskCount ?? 0}
+        loading={deleteColumnMutation.isPending}
+        onConfirm={handleConfirmDeleteWithTasks}
+      />
     </>
   );
 }

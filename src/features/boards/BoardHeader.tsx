@@ -14,7 +14,6 @@ export interface BoardHeaderProps {
   onOpenShare: () => void;
   onOpenSettings: () => void;
   canEdit: boolean;
-  isOwner: boolean;
 }
 
 export function BoardHeader({
