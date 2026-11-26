@@ -360,6 +360,7 @@ export function useMoveColumnMutation(boardId: string) {
       const previousDetail = queryClient.getQueryData<BoardDetail>(
         boardKeys.detail(boardId),
       );
+      const previousColumns = previousDetail?.columns;
 
       if (previousDetail && colMoveSeqRef.current === seq) {
         const nextColumns = previousDetail.columns
@@ -371,14 +372,20 @@ export function useMoveColumnMutation(boardId: string) {
         });
       }
 
-      return { previousDetail, seq };
+      return { previousColumns, seq };
     },
     onError: (err, _variables, context) => {
-      if (context?.previousDetail && colMoveSeqRef.current === context.seq) {
-        queryClient.setQueryData(
+      const previousColumns = context?.previousColumns;
+      if (previousColumns && colMoveSeqRef.current === context?.seq) {
+        const current = queryClient.getQueryData<BoardDetail>(
           boardKeys.detail(boardId),
-          context.previousDetail,
         );
+        if (current) {
+          queryClient.setQueryData<BoardDetail>(boardKeys.detail(boardId), {
+            ...current,
+            columns: previousColumns,
+          });
+        }
       }
       toast.error(
         getApiError(err).detail ?? 'Não foi possível mover a coluna.',

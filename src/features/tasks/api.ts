@@ -365,6 +365,9 @@ export function useMoveTaskMutation(boardId: string) {
       const previousDetail = queryClient.getQueryData<BoardDetail>(
         boardKeys.detail(boardId),
       );
+      const previousTask = previousDetail?.tasks.find(
+        (task) => task.id === taskId,
+      );
 
       if (previousDetail && taskMoveSeqRef.current.get(taskId) === seq) {
         const targetColumn = previousDetail.columns.find(
@@ -396,17 +399,25 @@ export function useMoveTaskMutation(boardId: string) {
         });
       }
 
-      return { previousDetail, seq, taskId };
+      return { previousTask, seq, taskId };
     },
     onError: (err, variables, context) => {
+      const previousTask = context?.previousTask;
       if (
-        context?.previousDetail &&
-        taskMoveSeqRef.current.get(variables.taskId) === context.seq
+        previousTask &&
+        taskMoveSeqRef.current.get(variables.taskId) === context?.seq
       ) {
-        queryClient.setQueryData(
+        const current = queryClient.getQueryData<BoardDetail>(
           boardKeys.detail(boardId),
-          context.previousDetail,
         );
+        if (current) {
+          queryClient.setQueryData<BoardDetail>(boardKeys.detail(boardId), {
+            ...current,
+            tasks: current.tasks.map((task) =>
+              task.id === variables.taskId ? previousTask : task,
+            ),
+          });
+        }
       }
       toast.error(
         getApiError(err).detail ?? 'Não foi possível mover a tarefa.',

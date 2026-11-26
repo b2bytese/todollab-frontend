@@ -1046,7 +1046,7 @@ describe('BoardKanbanView', () => {
   it('twoRapidTaskMovesOutOfOrderResponseKeepsLatestColumnAndDefersInvalidation', async () => {
     const detail = createBoardDetail('OWNER');
     let serverDetail = structuredClone(detail);
-    let getCount = 0;
+    const pendingGets: Array<() => void> = [];
 
     const pendingMoves: {
       targetColumnId: string;
@@ -1059,14 +1059,17 @@ describe('BoardKanbanView', () => {
       const url = config.url ?? '';
 
       if (method === 'get' && url === '/api/v1/boards/board-1') {
-        getCount += 1;
-        return {
-          status: 200,
-          statusText: 'OK',
-          headers: new AxiosHeaders(),
-          config,
-          data: serverDetail,
-        };
+        return new Promise((resolve) => {
+          pendingGets.push(() => {
+            resolve({
+              status: 200,
+              statusText: 'OK',
+              headers: new AxiosHeaders(),
+              config,
+              data: serverDetail,
+            });
+          });
+        });
       }
 
       if (
@@ -1141,7 +1144,11 @@ describe('BoardKanbanView', () => {
         return new DOMRect(0, 0, 0, 0);
       });
 
-    renderKanbanView({ detail, canEdit: true, useRealQuery: true });
+    const { queryClient } = renderKanbanView({
+      detail,
+      canEdit: true,
+      useRealQuery: true,
+    });
 
     // 1st move: col-todo -> col-doing
     const task1Initial = screen.getByTestId('kanban-card-task-1');
@@ -1257,18 +1264,24 @@ describe('BoardKanbanView', () => {
         'kanban-card-task-1',
       ),
     ).toBeInTheDocument();
-    expect(getCount).toBe(0);
+    expect(pendingGets).toHaveLength(0);
 
-    // Resolve 1st (stale) request SECOND
+    // Resolve 1st (stale) request SECOND, while GET refetch remains deferred
     await act(async () => {
       pendingMoves[0].resolve(staleDoingTask1);
       await Promise.resolve();
     });
 
-    // Must remain in col-done (never revert to col-doing), and now trigger invalidation
+    // Invalidation is queued now that all moves settled, but GET has NOT resolved yet
     await waitFor(() => {
-      expect(getCount).toBe(1);
+      expect(pendingGets).toHaveLength(1);
     });
+    // Cache and DOM must STILL hold col-done (never reverted by stale onSuccess) BEFORE GET resolves
+    expect(
+      queryClient
+        .getQueryData<BoardDetail>(boardKeys.detail('board-1'))
+        ?.tasks.find((t) => t.id === 'task-1')?.columnId,
+    ).toBe('col-done');
     expect(
       within(screen.getByTestId('kanban-column-col-done')).getByTestId(
         'kanban-card-task-1',
@@ -1279,6 +1292,17 @@ describe('BoardKanbanView', () => {
         'kanban-card-task-1',
       ),
     ).not.toBeInTheDocument();
+
+    // Now resolve the deferred GET
+    await act(async () => {
+      pendingGets[0]();
+      await Promise.resolve();
+    });
+    expect(
+      within(screen.getByTestId('kanban-column-col-done')).getByTestId(
+        'kanban-card-task-1',
+      ),
+    ).toBeInTheDocument();
 
     rectSpy.mockRestore();
   });
@@ -1699,7 +1723,7 @@ describe('BoardKanbanView', () => {
       position: number;
       resolve: (columns: BoardDetail['columns']) => void;
     }[] = [];
-    let getCount = 0;
+    const pendingGets: Array<() => void> = [];
 
     const latestOrderCols: BoardDetail['columns'] = [
       { ...detail.columns[1], position: 2000 },
@@ -1712,21 +1736,24 @@ describe('BoardKanbanView', () => {
       { ...detail.columns[0], position: 4000 },
       { ...detail.columns[1], position: 5000 },
     ];
-    let serverDetail: BoardDetail = { ...detail, columns: finalOrderCols };
+    const serverDetail: BoardDetail = { ...detail, columns: finalOrderCols };
 
     api.defaults.adapter = async (config) => {
       const method = config.method?.toLowerCase() ?? 'get';
       const url = config.url ?? '';
 
       if (method === 'get' && url === '/api/v1/boards/board-1') {
-        getCount += 1;
-        return {
-          status: 200,
-          statusText: 'OK',
-          headers: new AxiosHeaders(),
-          config,
-          data: serverDetail,
-        };
+        return new Promise((resolve) => {
+          pendingGets.push(() => {
+            resolve({
+              status: 200,
+              statusText: 'OK',
+              headers: new AxiosHeaders(),
+              config,
+              data: serverDetail,
+            });
+          });
+        });
       }
 
       const match = url.match(/^\/api\/v1\/boards\/board-1\/columns\/([^/]+)\/move$/);
@@ -1826,20 +1853,426 @@ describe('BoardKanbanView', () => {
     expect(
       queryClient.getQueryData<BoardDetail>(boardKeys.detail('board-1'))?.columns.map((c) => c.id),
     ).toEqual(['col-done', 'col-todo', 'col-doing']);
-    expect(getCount).toBe(0);
+    expect(pendingGets).toHaveLength(0);
 
-    // Resolve 1st (stale) move SECOND -> must NOT overwrite final order
+    // Resolve 1st (stale) move SECOND, while GET refetch remains deferred
     await act(async () => {
       pendingColumnMoves[0].resolve(latestOrderCols);
       await Promise.resolve();
     });
 
     await waitFor(() => {
-      expect(getCount).toBe(1);
+      expect(pendingGets).toHaveLength(1);
     });
+    // Cache and DOM must STILL hold [col-done, col-todo, col-doing] BEFORE GET resolves
     expect(
       queryClient.getQueryData<BoardDetail>(boardKeys.detail('board-1'))?.columns.map((c) => c.id),
     ).toEqual(['col-done', 'col-todo', 'col-doing']);
+    expect(
+      screen.getAllByRole('region').map((el) => el.getAttribute('aria-label')),
+    ).toEqual(['Concluído', 'A fazer', 'Em andamento']);
+
+    // Resolve deferred GET
+    await act(async () => {
+      pendingGets[0]();
+      await Promise.resolve();
+    });
+
+    rectSpy.mockRestore();
+  });
+
+  it('staleFailedTaskMoveDoesNotRollBackNewerTaskMove', async () => {
+    const detail = createBoardDetail('OWNER');
+    const toastErrorSpy = vi.spyOn(toast, 'error').mockImplementation(() => '');
+    const pendingGets: Array<() => void> = [];
+    const pendingMoves: {
+      position: number;
+      resolve: (task: TaskItem) => void;
+      reject: (detailMsg: string) => void;
+    }[] = [];
+
+    const doneTask1: TaskItem = {
+      ...detail.tasks[0],
+      columnId: 'col-done',
+      position: 2000,
+      completed: true,
+      completedAt: '2026-11-26T12:00:00Z',
+    };
+    const serverDetail: BoardDetail = {
+      ...detail,
+      tasks: detail.tasks.map((t) => (t.id === 'task-1' ? doneTask1 : t)),
+    };
+
+    api.defaults.adapter = async (config) => {
+      const method = config.method?.toLowerCase() ?? 'get';
+      const url = config.url ?? '';
+
+      if (method === 'get' && url === '/api/v1/boards/board-1') {
+        return new Promise((resolve) => {
+          pendingGets.push(() => {
+            resolve({
+              status: 200,
+              statusText: 'OK',
+              headers: new AxiosHeaders(),
+              config,
+              data: serverDetail,
+            });
+          });
+        });
+      }
+
+      if (
+        method === 'patch' &&
+        url === '/api/v1/boards/board-1/tasks/task-1/move'
+      ) {
+        const body = (
+          typeof config.data === 'string'
+            ? JSON.parse(config.data)
+            : config.data
+        ) as { targetColumnId: string; position: number };
+
+        return new Promise((resolve, reject) => {
+          pendingMoves.push({
+            position: body.position,
+            resolve: (movedTask) => {
+              resolve({
+                status: 200,
+                statusText: 'OK',
+                headers: new AxiosHeaders(),
+                config,
+                data: {
+                  task: movedTask,
+                  rebalanced: false,
+                  columnPositions: [
+                    { id: movedTask.id, position: movedTask.position },
+                  ],
+                },
+              });
+            },
+            reject: (detailMsg) => {
+              reject(makeAxiosError(500, config, { status: 500, detail: detailMsg }));
+            },
+          });
+        });
+      }
+
+      throw new Error(`Unexpected request: ${method} ${url}`);
+    };
+
+    const rectSpy = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockImplementation(function (this: HTMLElement) {
+        const testId = this.getAttribute('data-testid');
+        if (testId === 'kanban-column-col-todo') {
+          return new DOMRect(0, 0, 300, 500);
+        }
+        if (testId === 'kanban-column-drop-col-todo') {
+          return new DOMRect(0, 50, 300, 450);
+        }
+        if (testId === 'kanban-column-col-doing') {
+          return new DOMRect(320, 0, 300, 500);
+        }
+        if (testId === 'kanban-column-drop-col-doing') {
+          return new DOMRect(320, 50, 300, 450);
+        }
+        if (testId === 'kanban-column-col-done') {
+          return new DOMRect(640, 0, 300, 500);
+        }
+        if (testId === 'kanban-column-drop-col-done') {
+          return new DOMRect(640, 50, 300, 450);
+        }
+        if (testId === 'kanban-card-task-1') {
+          const inDoing = Boolean(
+            this.closest('[data-testid="kanban-column-col-doing"]'),
+          );
+          return inDoing
+            ? new DOMRect(330, 60, 280, 80)
+            : new DOMRect(10, 60, 280, 80);
+        }
+        if (testId === 'kanban-card-task-2') {
+          return new DOMRect(650, 60, 280, 80);
+        }
+        return new DOMRect(0, 0, 0, 0);
+      });
+
+    const { queryClient } = renderKanbanView({
+      detail,
+      canEdit: true,
+      useRealQuery: true,
+    });
+
+    // Move 1: col-todo -> col-doing
+    fireEvent.pointerDown(screen.getByTestId('kanban-card-task-1'), {
+      button: 0,
+      buttons: 1,
+      clientX: 50,
+      clientY: 100,
+      pointerId: 1,
+      pointerType: 'mouse',
+      isPrimary: true,
+    });
+    fireEvent.pointerMove(document, { clientX: 60, clientY: 100, pointerId: 1, pointerType: 'mouse' });
+    fireEvent.pointerMove(document, { clientX: 400, clientY: 300, pointerId: 1, pointerType: 'mouse' });
+    fireEvent.pointerUp(document, { clientX: 400, clientY: 300, pointerId: 1, pointerType: 'mouse' });
+
+    await waitFor(() => {
+      expect(pendingMoves).toHaveLength(1);
+    });
+
+    // Move 2: col-doing -> col-done
+    fireEvent.pointerDown(screen.getByTestId('kanban-card-task-1'), {
+      button: 0,
+      buttons: 1,
+      clientX: 350,
+      clientY: 100,
+      pointerId: 1,
+      pointerType: 'mouse',
+      isPrimary: true,
+    });
+    fireEvent.pointerMove(document, { clientX: 360, clientY: 100, pointerId: 1, pointerType: 'mouse' });
+    fireEvent.pointerMove(document, { clientX: 700, clientY: 300, pointerId: 1, pointerType: 'mouse' });
+    fireEvent.pointerUp(document, { clientX: 700, clientY: 300, pointerId: 1, pointerType: 'mouse' });
+
+    await waitFor(() => {
+      expect(pendingMoves).toHaveLength(2);
+    });
+
+    // Move 2 succeeds FIRST
+    await act(async () => {
+      pendingMoves[1].resolve({ ...doneTask1, position: pendingMoves[1].position });
+      await Promise.resolve();
+    });
+    expect(pendingGets).toHaveLength(0);
+
+    // Move 1 fails SECOND -> must NOT roll back Move 2 in cache/DOM before GET resolves
+    await act(async () => {
+      pendingMoves[0].reject('Falha na primeira movimentação');
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(toastErrorSpy).toHaveBeenCalledWith('Falha na primeira movimentação');
+      expect(pendingGets).toHaveLength(1);
+    });
+    expect(
+      queryClient
+        .getQueryData<BoardDetail>(boardKeys.detail('board-1'))
+        ?.tasks.find((t) => t.id === 'task-1')?.columnId,
+    ).toBe('col-done');
+    expect(
+      within(screen.getByTestId('kanban-column-col-done')).getByTestId(
+        'kanban-card-task-1',
+      ),
+    ).toBeInTheDocument();
+
+    await act(async () => {
+      pendingGets[0]();
+      await Promise.resolve();
+    });
+
+    rectSpy.mockRestore();
+  });
+
+  it('concurrentDifferentTaskMovesRollbackOnlyFailedTaskWithoutClobberingSucceededTask', async () => {
+    const baseDetail = createBoardDetail('OWNER');
+    const taskB: TaskItem = {
+      ...baseDetail.tasks[0],
+      id: 'task-b',
+      columnId: 'col-todo',
+      title: 'Tarefa B concorrente',
+      position: 2000,
+    };
+    const detail: BoardDetail = {
+      ...baseDetail,
+      tasks: [...baseDetail.tasks, taskB],
+    };
+
+    const toastErrorSpy = vi.spyOn(toast, 'error').mockImplementation(() => '');
+    const pendingGets: Array<() => void> = [];
+    const pendingByTaskId = new Map<
+      string,
+      {
+        position: number;
+        resolve: (movedTask: TaskItem) => void;
+        reject: (msg: string) => void;
+      }
+    >();
+
+    api.defaults.adapter = async (config) => {
+      const method = config.method?.toLowerCase() ?? 'get';
+      const url = config.url ?? '';
+
+      if (method === 'get' && url === '/api/v1/boards/board-1') {
+        return new Promise((resolve) => {
+          pendingGets.push(() => {
+            resolve({
+              status: 200,
+              statusText: 'OK',
+              headers: new AxiosHeaders(),
+              config,
+              data: detail,
+            });
+          });
+        });
+      }
+
+      const match = url.match(/^\/api\/v1\/boards\/board-1\/tasks\/([^/]+)\/move$/);
+      if (method === 'patch' && match) {
+        const body = (
+          typeof config.data === 'string'
+            ? JSON.parse(config.data)
+            : config.data
+        ) as { targetColumnId: string; position: number };
+
+        return new Promise((resolve, reject) => {
+          pendingByTaskId.set(match[1], {
+            position: body.position,
+            resolve: (movedTask) => {
+              resolve({
+                status: 200,
+                statusText: 'OK',
+                headers: new AxiosHeaders(),
+                config,
+                data: {
+                  task: movedTask,
+                  rebalanced: false,
+                  columnPositions: [
+                    { id: movedTask.id, position: movedTask.position },
+                  ],
+                },
+              });
+            },
+            reject: (msg) => {
+              reject(makeAxiosError(500, config, { status: 500, detail: msg }));
+            },
+          });
+        });
+      }
+
+      throw new Error(`Unexpected request: ${method} ${url}`);
+    };
+
+    const rectSpy = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockImplementation(function (this: HTMLElement) {
+        const testId = this.getAttribute('data-testid');
+        if (testId === 'kanban-column-col-todo') {
+          return new DOMRect(0, 0, 300, 500);
+        }
+        if (testId === 'kanban-column-drop-col-todo') {
+          return new DOMRect(0, 50, 300, 450);
+        }
+        if (testId === 'kanban-card-task-1') {
+          return new DOMRect(10, 60, 280, 80);
+        }
+        if (testId === 'kanban-card-task-b') {
+          return new DOMRect(10, 160, 280, 80);
+        }
+        if (testId === 'kanban-column-col-doing') {
+          return new DOMRect(320, 0, 300, 500);
+        }
+        if (testId === 'kanban-column-drop-col-doing') {
+          return new DOMRect(320, 50, 300, 450);
+        }
+        if (testId === 'kanban-column-col-done') {
+          return new DOMRect(640, 0, 300, 500);
+        }
+        if (testId === 'kanban-column-drop-col-done') {
+          return new DOMRect(640, 50, 300, 450);
+        }
+        if (testId === 'kanban-card-task-2') {
+          return new DOMRect(650, 60, 280, 80);
+        }
+        return new DOMRect(0, 0, 0, 0);
+      });
+
+    const { queryClient } = renderKanbanView({
+      detail,
+      canEdit: true,
+      useRealQuery: true,
+    });
+
+    // Move task-1 -> col-doing
+    fireEvent.pointerDown(screen.getByTestId('kanban-card-task-1'), {
+      button: 0,
+      buttons: 1,
+      clientX: 50,
+      clientY: 100,
+      pointerId: 1,
+      pointerType: 'mouse',
+      isPrimary: true,
+    });
+    fireEvent.pointerMove(document, { clientX: 60, clientY: 100, pointerId: 1, pointerType: 'mouse' });
+    fireEvent.pointerMove(document, { clientX: 400, clientY: 300, pointerId: 1, pointerType: 'mouse' });
+    fireEvent.pointerUp(document, { clientX: 400, clientY: 300, pointerId: 1, pointerType: 'mouse' });
+
+    await waitFor(() => {
+      expect(pendingByTaskId.has('task-1')).toBe(true);
+    });
+
+    // Concurrently move task-b -> col-done
+    fireEvent.pointerDown(screen.getByTestId('kanban-card-task-b'), {
+      button: 0,
+      buttons: 1,
+      clientX: 50,
+      clientY: 200,
+      pointerId: 1,
+      pointerType: 'mouse',
+      isPrimary: true,
+    });
+    fireEvent.pointerMove(document, { clientX: 60, clientY: 200, pointerId: 1, pointerType: 'mouse' });
+    fireEvent.pointerMove(document, { clientX: 700, clientY: 300, pointerId: 1, pointerType: 'mouse' });
+    fireEvent.pointerUp(document, { clientX: 700, clientY: 300, pointerId: 1, pointerType: 'mouse' });
+
+    await waitFor(() => {
+      expect(pendingByTaskId.has('task-b')).toBe(true);
+    });
+
+    // task-b succeeds FIRST -> moved to col-done
+    const taskBMoved: TaskItem = {
+      ...taskB,
+      columnId: 'col-done',
+      position: pendingByTaskId.get('task-b')!.position,
+      completed: true,
+      completedAt: '2026-11-26T12:00:00Z',
+    };
+    await act(async () => {
+      pendingByTaskId.get('task-b')!.resolve(taskBMoved);
+      await Promise.resolve();
+    });
+    expect(pendingGets).toHaveLength(0);
+
+    // task-1 fails SECOND -> must restore ONLY task-1 to col-todo without clobbering task-b in col-done (BEFORE GET resolves)
+    await act(async () => {
+      pendingByTaskId.get('task-1')!.reject('Falha em task-1');
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(toastErrorSpy).toHaveBeenCalledWith('Falha em task-1');
+      expect(pendingGets).toHaveLength(1);
+    });
+
+    const cachedTasks = queryClient.getQueryData<BoardDetail>(
+      boardKeys.detail('board-1'),
+    )?.tasks;
+    expect(cachedTasks?.find((t) => t.id === 'task-1')?.columnId).toBe('col-todo');
+    expect(cachedTasks?.find((t) => t.id === 'task-b')?.columnId).toBe('col-done');
+    expect(
+      within(screen.getByTestId('kanban-column-col-todo')).getByTestId(
+        'kanban-card-task-1',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId('kanban-column-col-done')).getByTestId(
+        'kanban-card-task-b',
+      ),
+    ).toBeInTheDocument();
+
+    await act(async () => {
+      pendingGets[0]();
+      await Promise.resolve();
+    });
 
     rectSpy.mockRestore();
   });
