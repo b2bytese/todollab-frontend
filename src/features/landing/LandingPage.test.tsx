@@ -118,4 +118,60 @@ describe('LandingPage', () => {
     expect(signatureLink).toHaveAttribute('target', '_blank');
     expect(signatureLink).toHaveAttribute('rel', 'noopener noreferrer');
   });
+
+  it('rendersFooterAnchorLinksAsNativeAnchorsAndPreservesRouterAndExternalLinks', () => {
+    const { container } = renderLandingPage();
+
+    const footer = container.querySelector('footer');
+    expect(footer).not.toBeNull();
+    const scoped = within(footer!);
+
+    const recursosLink = scoped.getByRole('link', { name: /^recursos$/i });
+    const processoLink = scoped.getByRole('link', { name: /^como funciona$/i });
+
+    expect(recursosLink).toHaveAttribute('href', '#recursos');
+    expect(processoLink).toHaveAttribute('href', '#processo');
+    expect(recursosLink).not.toHaveAttribute('target');
+    expect(processoLink).not.toHaveAttribute('target');
+
+    const recursosClick = new MouseEvent('click', {
+      bubbles: true,
+      cancelable: true,
+    });
+    fireEvent(recursosLink, recursosClick);
+    expect(recursosClick.defaultPrevented).toBe(false);
+
+    const processoClick = new MouseEvent('click', {
+      bubbles: true,
+      cancelable: true,
+    });
+    fireEvent(processoLink, processoClick);
+    expect(processoClick.defaultPrevented).toBe(false);
+
+    const loginLink = scoped.getByRole('link', { name: /^fazer login$/i });
+    const signupLink = scoped.getByRole('link', { name: /^nova conta$/i });
+    expect(loginLink).toHaveAttribute('href', '/login');
+    expect(signupLink).toHaveAttribute('href', '/signup');
+    expect(loginLink).not.toHaveAttribute('target');
+    expect(signupLink).not.toHaveAttribute('target');
+
+    const loginClick = new MouseEvent('click', {
+      bubbles: true,
+      cancelable: true,
+    });
+    fireEvent(loginLink, loginClick);
+    expect(loginClick.defaultPrevented).toBe(true);
+
+    const signupClick = new MouseEvent('click', {
+      bubbles: true,
+      cancelable: true,
+    });
+    fireEvent(signupLink, signupClick);
+    expect(signupClick.defaultPrevented).toBe(true);
+
+    const externalLink = scoped.getByRole('link', { name: /^b2byte ↗$/i });
+    expect(externalLink).toHaveAttribute('href', 'https://b2byte.com/');
+    expect(externalLink).toHaveAttribute('target', '_blank');
+    expect(externalLink).toHaveAttribute('rel', 'noopener noreferrer');
+  });
 });

@@ -173,6 +173,9 @@ const FOOTER_NAV = [
   },
 ] as const;
 
+const FOOTER_LINK_CLASS =
+  'text-sm text-editorial-muted-fg hover:text-brand-coral transition-colors block mb-3 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-coral';
+
 function WorkspacePreview() {
   const [previewMode, setPreviewMode] = useState<'KANBAN' | 'LIST'>('KANBAN');
 
@@ -1021,14 +1024,21 @@ export function LandingPage() {
                                 href={link.href}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="text-sm text-editorial-muted-fg hover:text-brand-coral transition-colors block mb-3 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-coral"
+                                className={FOOTER_LINK_CLASS}
+                              >
+                                {link.label}
+                              </a>
+                            ) : link.href.startsWith('#') ? (
+                              <a
+                                href={link.href}
+                                className={FOOTER_LINK_CLASS}
                               >
                                 {link.label}
                               </a>
                             ) : (
                               <Link
                                 to={link.href}
-                                className="text-sm text-editorial-muted-fg hover:text-brand-coral transition-colors block mb-3 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-coral"
+                                className={FOOTER_LINK_CLASS}
                               >
                                 {link.label}
                               </Link>

@@ -506,4 +506,57 @@ describe('MyTasksPage', () => {
     });
     expect(boardsAttempts).toBe(2);
   });
+
+  it('appliesDarkCoralForegroundToActiveViewButtonsInCreateBoardDialog', async () => {
+    const user = userEvent.setup();
+    api.defaults.adapter = async (config) => {
+      if (config.url === '/api/v1/tasks/my-tasks') {
+        return {
+          status: 200,
+          statusText: 'OK',
+          headers: new AxiosHeaders(),
+          config,
+          data: [],
+        };
+      }
+      if (config.url === '/api/v1/users/me/invites') {
+        return {
+          status: 200,
+          statusText: 'OK',
+          headers: new AxiosHeaders(),
+          config,
+          data: [],
+        };
+      }
+      if (config.url === '/api/v1/boards') {
+        return {
+          status: 200,
+          statusText: 'OK',
+          headers: new AxiosHeaders(),
+          config,
+          data: [],
+        };
+      }
+      throw new Error(`Unexpected request: ${config.method} ${config.url}`);
+    };
+
+    renderMyTasksPage();
+
+    await user.click(screen.getAllByRole('button', { name: /novo quadro/i })[0]);
+    const dialog = await screen.findByRole('dialog');
+    const viewSection = within(dialog).getByText('Visualização inicial').parentElement!;
+
+    const kanbanButton = within(viewSection).getByRole('button', { name: /^kanban$/i });
+    const listButton = within(viewSection).getByRole('button', { name: /^lista$/i });
+
+    expect(kanbanButton).toHaveAttribute('aria-pressed', 'true');
+    expect(kanbanButton).toHaveClass('dark:bg-brand-coral', 'dark:text-brand-coral-foreground');
+    expect(listButton).toHaveAttribute('aria-pressed', 'false');
+
+    await user.click(listButton);
+
+    expect(listButton).toHaveAttribute('aria-pressed', 'true');
+    expect(listButton).toHaveClass('dark:bg-brand-coral', 'dark:text-brand-coral-foreground');
+    expect(kanbanButton).toHaveAttribute('aria-pressed', 'false');
+  });
 });
