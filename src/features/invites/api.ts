@@ -94,19 +94,21 @@ export async function transferOwnership(
 }
 
 export async function fetchInvitePreview(token: string): Promise<InvitePreview> {
-  const { data } = await api.get<InvitePreview>(`/api/v1/invites/${token}/preview`);
+  const { data } = await api.get<InvitePreview>(
+    `/api/v1/invites/${encodeURIComponent(token)}/preview`,
+  );
   return data;
 }
 
 export async function acceptInvite(token: string): Promise<AcceptInviteResponse> {
   const { data } = await api.post<AcceptInviteResponse>(
-    `/api/v1/invites/${token}/accept`,
+    `/api/v1/invites/${encodeURIComponent(token)}/accept`,
   );
   return data;
 }
 
 export async function declineInvite(token: string): Promise<void> {
-  await api.post(`/api/v1/invites/${token}/decline`);
+  await api.post(`/api/v1/invites/${encodeURIComponent(token)}/decline`);
 }
 
 export function useBoardInvitesQuery(boardId: string, enabled: boolean) {

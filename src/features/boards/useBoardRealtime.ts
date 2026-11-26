@@ -566,6 +566,9 @@ export function useBoardRealtime(
           void client?.deactivate();
           queryClient.removeQueries({ queryKey: boardKeys.detail(boardId) });
           void queryClient.invalidateQueries({ queryKey: boardKeys.all });
+          void queryClient.invalidateQueries({
+            queryKey: boardKeys.myTasksRoot,
+          });
           redirectToMyTasks();
         }
       },

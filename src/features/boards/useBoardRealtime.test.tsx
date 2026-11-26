@@ -785,7 +785,7 @@ describe('useBoardRealtime / applyBoardEventToCache', () => {
       expect(deactivate).toHaveBeenCalledTimes(1);
     });
 
-    // 3. Forbidden error ('AccessDenied') -> deactivates, clears board cache, invalidates boardKeys.all, redirects
+    // 3. Forbidden error ('AccessDenied') -> deactivates, clears board cache, invalidates boardKeys.all and myTasksRoot, redirects
     await act(async () => {
       capturedOptions!.onStompError?.({
         command: 'ERROR',
@@ -804,11 +804,15 @@ describe('useBoardRealtime / applyBoardEventToCache', () => {
       queryKey: boardKeys.detail('board-1'),
     });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: boardKeys.all });
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: boardKeys.myTasksRoot,
+    });
     expect(
       queryClient.getQueryData(boardKeys.detail('board-1')),
     ).toBeUndefined();
 
     // 4. Forbidden error ('Forbidden') on a new board -> resets redirect guard and redirects again
+    invalidateSpy.mockClear();
     queryClient.setQueryData(boardKeys.detail('board-2'), createInitialDetail());
     await act(async () => {
       navigateFn!('/app/boards/board-2');
@@ -841,6 +845,10 @@ describe('useBoardRealtime / applyBoardEventToCache', () => {
     expect(deactivate).toHaveBeenCalledTimes(deactivateCallsBeforeStep4 + 1);
     expect(removeSpy).toHaveBeenCalledWith({
       queryKey: boardKeys.detail('board-2'),
+    });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: boardKeys.all });
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: boardKeys.myTasksRoot,
     });
   });
 

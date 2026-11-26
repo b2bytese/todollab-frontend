@@ -608,7 +608,7 @@ describe('InviteFlow', () => {
     expect(acceptCalls).toBe(0);
   });
 
-  it('encodes inviteToken safely in navigation URLs', async () => {
+  it('encodes inviteToken safely in navigation and API URLs', async () => {
     const user = userEvent.setup();
     vi.spyOn(toast, 'success').mockImplementation(() => '');
 
@@ -624,8 +624,13 @@ describe('InviteFlow', () => {
       reason: null,
     };
 
+    const requestedUrls: string[] = [];
+
     api.defaults.adapter = async (config) => {
       const method = config.method?.toLowerCase();
+      if (config.url) {
+        requestedUrls.push(`${method?.toUpperCase()} ${config.url}`);
+      }
       if (method === 'post' && config.url === '/api/v1/auth/login') {
         return {
           status: 200,
@@ -640,8 +645,7 @@ describe('InviteFlow', () => {
       }
       if (
         method === 'get' &&
-        config.url?.startsWith('/api/v1/invites/') &&
-        config.url.endsWith('/preview')
+        config.url === '/api/v1/invites/a%2Fb%3Fc%3D1/preview'
       ) {
         return {
           status: 200,
@@ -649,6 +653,21 @@ describe('InviteFlow', () => {
           headers: new AxiosHeaders(),
           config,
           data: preview,
+        };
+      }
+      if (
+        method === 'post' &&
+        config.url === '/api/v1/invites/a%2Fb%3Fc%3D1/accept'
+      ) {
+        return {
+          status: 200,
+          statusText: 'OK',
+          headers: new AxiosHeaders(),
+          config,
+          data: {
+            boardId: 'board-encoded',
+            role: 'EDITOR',
+          },
         };
       }
       throw new Error(`Unexpected request: ${config.method} ${config.url}`);
@@ -667,6 +686,86 @@ describe('InviteFlow', () => {
       expect(screen.getByText('Encoded Token Board')).toBeInTheDocument();
     });
     expect(screen.queryByTestId('not-found-route')).not.toBeInTheDocument();
+    expect(requestedUrls).toContain('GET /api/v1/invites/a%2Fb%3Fc%3D1/preview');
+
+    await user.click(screen.getByRole('button', { name: /aceitar convite/i }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-destination')).toHaveTextContent(
+        'Board board-encoded',
+      );
+    });
+    expect(requestedUrls).toContain('POST /api/v1/invites/a%2Fb%3Fc%3D1/accept');
+  });
+
+  it('encodes inviteToken safely when declining an invite', async () => {
+    const user = userEvent.setup();
+    useAuthStore.setState({
+      accessToken: 'test-token',
+      user: mockUser,
+      status: 'authenticated',
+    });
+    vi.spyOn(toast, 'info').mockImplementation(() => '');
+
+    const preview: InvitePreview = {
+      boardName: 'Traversal Token Board',
+      boardColor: '#0C2439',
+      boardIcon: 'rocket',
+      inviterName: 'Ana Silva',
+      role: 'VIEWER',
+      type: 'EMAIL',
+      targetEmailMasked: 'b***@example.com',
+      valid: true,
+      reason: null,
+    };
+
+    const requestedUrls: string[] = [];
+
+    api.defaults.adapter = async (config) => {
+      const method = config.method?.toLowerCase();
+      if (config.url) {
+        requestedUrls.push(`${method?.toUpperCase()} ${config.url}`);
+      }
+      if (
+        method === 'get' &&
+        config.url === '/api/v1/invites/..%2Fadmin/preview'
+      ) {
+        return {
+          status: 200,
+          statusText: 'OK',
+          headers: new AxiosHeaders(),
+          config,
+          data: preview,
+        };
+      }
+      if (
+        method === 'post' &&
+        config.url === '/api/v1/invites/..%2Fadmin/decline'
+      ) {
+        return {
+          status: 204,
+          statusText: 'No Content',
+          headers: new AxiosHeaders(),
+          config,
+          data: null,
+        };
+      }
+      throw new Error(`Unexpected request: ${config.method} ${config.url}`);
+    };
+
+    renderInviteRoute('/invite/..%2Fadmin');
+
+    await waitFor(() => {
+      expect(screen.getByText('Traversal Token Board')).toBeInTheDocument();
+    });
+    expect(requestedUrls).toContain('GET /api/v1/invites/..%2Fadmin/preview');
+
+    await user.click(screen.getByRole('button', { name: /recusar/i }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('my-tasks-page')).toBeInTheDocument();
+    });
+    expect(requestedUrls).toContain('POST /api/v1/invites/..%2Fadmin/decline');
   });
 
   it('renders expired/invalid invite state and clears pending invite token', async () => {
