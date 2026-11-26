@@ -37,3 +37,7 @@ coverage/
 # System files
 .DS_Store
 Thumbs.db
+
+# Worktrees & Superpowers scratch
+.worktrees/
+.superpowers/
