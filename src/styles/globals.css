@@ -36,10 +36,12 @@
   --editorial-bg: #07111b;
   --editorial-surface: #0c1b2a;
   --editorial-panel: #0f2031;
+  --editorial-stage: #132b41;
   --editorial-border: #1e3a54;
   --editorial-fg: #f1f5f9;
   --editorial-muted: #9aafc3;
   --editorial-muted-fg: #e0e8f0;
+  --editorial-paper: #f8f7f4;
 
   --radius: 0.625rem;
 }
@@ -107,10 +109,12 @@
   --color-editorial-bg: var(--editorial-bg);
   --color-editorial-surface: var(--editorial-surface);
   --color-editorial-panel: var(--editorial-panel);
+  --color-editorial-stage: var(--editorial-stage);
   --color-editorial-border: var(--editorial-border);
   --color-editorial-fg: var(--editorial-fg);
   --color-editorial-muted: var(--editorial-muted);
   --color-editorial-muted-fg: var(--editorial-muted-fg);
+  --color-editorial-paper: var(--editorial-paper);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);

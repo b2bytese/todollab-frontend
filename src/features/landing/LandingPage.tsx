@@ -663,10 +663,7 @@ export function LandingPage() {
 
       <main className="flex-1">
         {/* Section 2 — Hero */}
-        <section
-          className="dark relative overflow-hidden"
-          style={{ background: '#07111b' }}
-        >
+        <section className="dark relative overflow-hidden bg-editorial-bg">
           {/* Geometric decorator */}
           <div
             aria-hidden="true"
@@ -675,8 +672,7 @@ export function LandingPage() {
           {/* Coral glow */}
           <div
             aria-hidden="true"
-            className="absolute -top-32 right-0 h-96 w-96 rounded-full blur-3xl pointer-events-none"
-            style={{ background: 'rgba(255,94,94,0.15)' }}
+            className="absolute -top-32 right-0 h-96 w-96 rounded-full bg-brand-coral/15 blur-3xl pointer-events-none"
           />
 
           <div className="relative z-10 max-w-6xl mx-auto px-4 py-16 sm:py-24 sm:px-6">
@@ -745,7 +741,7 @@ export function LandingPage() {
                 className="relative rounded-t-2xl border border-editorial-border overflow-hidden min-w-0"
                 style={{
                   background:
-                    'radial-gradient(ellipse at 70% 20%, rgba(255,94,94,0.44), transparent 40%), repeating-linear-gradient(125deg, transparent 0 64px, rgba(255,255,255,0.04) 65px 66px), linear-gradient(125deg, #132b41, #07111b 70%)',
+                    'radial-gradient(ellipse at 70% 20%, color-mix(in srgb, var(--brand-coral) 44%, transparent), transparent 40%), repeating-linear-gradient(125deg, transparent 0 64px, color-mix(in srgb, var(--editorial-fg) 4%, transparent) 65px 66px), linear-gradient(125deg, var(--editorial-stage), var(--editorial-bg) 70%)',
                 }}
               >
                 <div className="p-6 pt-10 pb-0">
@@ -850,11 +846,7 @@ export function LandingPage() {
         </section>
 
         {/* Section 4 — How It Works */}
-        <section
-          id="processo"
-          className="dark"
-          style={{ background: '#07111b', color: '#f1f5f9' }}
-        >
+        <section id="processo" className="dark bg-editorial-bg text-editorial-fg">
           <div className="max-w-6xl mx-auto px-4 py-20 sm:py-24 sm:px-6">
             <span className="text-brand-coral text-[11px] uppercase tracking-[0.15em] font-semibold">
               02 / Como funciona
@@ -902,11 +894,7 @@ export function LandingPage() {
               {/* Glow */}
               <div
                 aria-hidden="true"
-                className="absolute -right-12 -top-12 h-56 w-56 rounded-full pointer-events-none"
-                style={{
-                  background: 'rgba(255,94,94,0.2)',
-                  filter: 'blur(60px)',
-                }}
+                className="absolute -right-12 -top-12 h-56 w-56 rounded-full bg-brand-coral/20 blur-[60px] pointer-events-none"
               />
               {/* Left */}
               <div className="relative">
@@ -934,10 +922,10 @@ export function LandingPage() {
 
       {/* Section 6 — Editorial Footer */}
       <footer
-        className="dark m-3 overflow-hidden rounded-2xl relative min-h-[600px] flex flex-col justify-between"
+        className="dark m-3 overflow-hidden rounded-2xl relative min-h-[600px] flex flex-col justify-between bg-editorial-bg"
         style={{
           backgroundImage:
-            "url('/footer-art.svg'), linear-gradient(#07111b, #07111b)",
+            "url('/footer-art.svg'), linear-gradient(var(--editorial-bg), var(--editorial-bg))",
           backgroundSize: 'cover',
           backgroundPosition: 'center',
         }}
@@ -948,7 +936,7 @@ export function LandingPage() {
           className="absolute inset-0 z-0 pointer-events-none"
           style={{
             backgroundImage:
-              'linear-gradient(90deg, rgba(7,17,27,0.91) 0%, rgba(7,17,27,0.61) 48%, rgba(7,17,27,0.56) 100%), linear-gradient(0deg, rgba(7,17,27,0.85), transparent 65%)',
+              'linear-gradient(90deg, color-mix(in srgb, var(--editorial-bg) 91%, transparent) 0%, color-mix(in srgb, var(--editorial-bg) 61%, transparent) 48%, color-mix(in srgb, var(--editorial-bg) 56%, transparent) 100%), linear-gradient(0deg, color-mix(in srgb, var(--editorial-bg) 85%, transparent), transparent 65%)',
           }}
         />
 
@@ -983,7 +971,7 @@ export function LandingPage() {
               </p>
 
               {/* Footer CTA bar */}
-              <div className="flex items-center justify-between bg-[#f8f7f4] text-[#0c1b2a] rounded-xl p-3 max-w-md mb-10 gap-3">
+              <div className="flex items-center justify-between bg-editorial-paper text-editorial-surface rounded-xl p-3 max-w-md mb-10 gap-3">
                 <span className="font-semibold pl-2 text-sm">
                   {isAuthenticated
                     ? 'Continuar no Todollab'
