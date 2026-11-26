@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { boardKeys } from '@/features/boards/api';
+import {
+  clearPendingInviteToken,
+  getPendingInviteToken,
+  setPendingInviteToken,
+} from '@/lib/pendingInvite';
 import { queryClient } from '@/lib/queryClient';
 import { useAuthStore } from '@/stores/authStore';
 import type { UserProfile } from '@/types/api';
@@ -14,6 +19,7 @@ const mockUser: UserProfile = {
 
 describe('authStore', () => {
   afterEach(() => {
+    clearPendingInviteToken();
     queryClient.clear();
     useAuthStore.setState({
       accessToken: null,
@@ -40,5 +46,13 @@ describe('authStore', () => {
     expect(queryClient.getQueryData(boardKeys.all)).toBeUndefined();
     expect(queryClient.getQueryData(boardKeys.myTasks())).toBeUndefined();
     expect(queryClient.getQueryData(boardKeys.myInvites)).toBeUndefined();
+  });
+
+  it('clears pending invite token and increments sessionVersion on clearSession', () => {
+    setPendingInviteToken('inv-token-1');
+    const prevVersion = useAuthStore.getState().sessionVersion;
+    useAuthStore.getState().clearSession();
+    expect(getPendingInviteToken()).toBeNull();
+    expect(useAuthStore.getState().sessionVersion).toBe(prevVersion + 1);
   });
 });

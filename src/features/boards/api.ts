@@ -14,6 +14,7 @@ export const boardKeys = {
   all: ['boards'] as const,
   detail: (boardId: string) => ['boards', boardId] as const,
   invites: (boardId: string) => ['boards', boardId, 'invites'] as const,
+  myTasksRoot: ['my-tasks'] as const,
   myTasks: (filters?: Record<string, string | boolean | undefined>) =>
     ['my-tasks', filters ?? {}] as const,
   myInvites: ['my-invites'] as const,

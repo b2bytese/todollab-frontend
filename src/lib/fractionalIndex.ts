@@ -10,7 +10,9 @@ export function calculateDropPosition(
     return 1000;
   }
   if (targetIndex <= 0) {
-    return orderedItems[0].position / 2;
+    return orderedItems[0].position > 0
+      ? orderedItems[0].position / 2
+      : orderedItems[0].position - 1000;
   }
   if (targetIndex >= orderedItems.length) {
     return orderedItems[orderedItems.length - 1].position + 1000;

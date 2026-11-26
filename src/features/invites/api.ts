@@ -12,11 +12,7 @@ import type {
   InvitePreview,
 } from '@/types/api';
 
-export const ROLE_LABELS: Record<BoardRole, string> = {
-  OWNER: 'Proprietário',
-  EDITOR: 'Editor',
-  VIEWER: 'Visualizador',
-};
+export { ROLE_LABELS } from '@/lib/taskMeta';
 
 export const inviteKeys = {
   preview: (token: string) => ['invite-preview', token] as const,
