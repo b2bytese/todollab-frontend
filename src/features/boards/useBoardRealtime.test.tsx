@@ -1,7 +1,7 @@
 import type { Client, IFrame } from '@stomp/stompjs';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, render, waitFor } from '@testing-library/react';
-import { MemoryRouter, useLocation } from 'react-router-dom';
+import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { boardKeys } from '@/features/boards/api';
@@ -734,9 +734,11 @@ describe('useBoardRealtime / applyBoardEventToCache', () => {
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
     const removeSpy = vi.spyOn(queryClient, 'removeQueries');
 
+    let navigateFn: ReturnType<typeof useNavigate> | null = null;
     function TestHarness({ boardId }: { boardId: string }) {
       useBoardRealtime(boardId, true);
       const location = useLocation();
+      navigateFn = useNavigate();
       return <div data-testid="location">{location.pathname}</div>;
     }
 
@@ -808,13 +810,20 @@ describe('useBoardRealtime / applyBoardEventToCache', () => {
 
     // 4. Forbidden error ('Forbidden') on a new board -> resets redirect guard and redirects again
     queryClient.setQueryData(boardKeys.detail('board-2'), createInitialDetail());
+    await act(async () => {
+      navigateFn!('/app/boards/board-2');
+    });
     rerender(
       <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={['/app/boards/board-2']}>
+        <MemoryRouter initialEntries={['/app/boards/board-1']}>
           <TestHarness boardId="board-2" />
         </MemoryRouter>
       </QueryClientProvider>,
     );
+
+    expect(getByTestId('location').textContent).toBe('/app/boards/board-2');
+    const deactivateCallsBeforeStep4 = deactivate.mock.calls.length;
+    expect(deactivateCallsBeforeStep4).toBe(3);
 
     await act(async () => {
       capturedOptions!.onStompError?.({
@@ -829,6 +838,7 @@ describe('useBoardRealtime / applyBoardEventToCache', () => {
     await waitFor(() => {
       expect(getByTestId('location').textContent).toBe('/app/my-tasks');
     });
+    expect(deactivate).toHaveBeenCalledTimes(deactivateCallsBeforeStep4 + 1);
     expect(removeSpy).toHaveBeenCalledWith({
       queryKey: boardKeys.detail('board-2'),
     });
