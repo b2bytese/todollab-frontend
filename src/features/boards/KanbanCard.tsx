@@ -69,7 +69,7 @@ export function KanbanCardPreview({
   return (
     <div
       className={cn(
-        'group rounded-xl border border-border bg-card p-3 shadow-xs transition-shadow select-none',
+        'group rounded-xl border border-border bg-card p-3 shadow-xs transition-all duration-150 select-none',
         canEdit && !isOverlay && 'cursor-grab active:cursor-grabbing',
         !isOverlay && 'hover:border-border/90 hover:shadow-sm',
         isDragging && 'opacity-40',

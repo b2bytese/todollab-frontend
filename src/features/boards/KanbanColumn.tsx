@@ -157,11 +157,11 @@ export function KanbanColumn({
       data-testid={`kanban-column-${column.id}`}
       aria-label={column.name}
       className={cn(
-        'flex w-[calc(100vw-2.5rem)] max-w-xs sm:w-80 shrink-0 snap-center sm:snap-align-none flex-col max-h-full rounded-xl border border-border bg-secondary/45 shadow-xs transition-opacity',
+        'flex w-[calc(100vw-2.5rem)] max-w-xs sm:w-80 shrink-0 snap-center sm:snap-align-none flex-col max-h-full rounded-xl border border-border bg-secondary/30 shadow-xs transition-opacity',
         isDragging && 'opacity-50',
       )}
     >
-      <div className="flex items-center justify-between gap-2 border-b border-border/80 px-3 py-2.5">
+      <div className="flex items-center justify-between gap-3 border-b border-border/80 px-3 py-2.5">
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
           <button
             type="button"
@@ -298,7 +298,7 @@ export function KanbanColumn({
           strategy={verticalListSortingStrategy}
         >
           {tasks.length === 0 ? (
-            <div className="flex h-20 items-center justify-center rounded-lg border border-dashed border-border/80 px-3 text-center text-xs text-muted-foreground">
+            <div className="flex h-20 items-center justify-center rounded-lg border border-dashed border-editorial-border/40 dark:border-editorial-border/60 px-3 text-center text-xs text-muted-foreground">
               {filtersActive
                 ? 'Nenhuma tarefa corresponde aos filtros.'
                 : 'Arraste uma tarefa para cá ou crie uma nova.'}
