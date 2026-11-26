@@ -1181,4 +1181,49 @@ describe('BoardPage List View & TaskDrawer', () => {
       ).not.toBeInTheDocument();
     });
   });
+
+  it('appliesDarkCoralForegroundToActiveViewButtonsInBoardSettingsDialog', async () => {
+    const user = userEvent.setup();
+    const detail = createBoardDetail('OWNER');
+
+    api.defaults.adapter = async (config) => {
+      const method = config.method?.toLowerCase() ?? 'get';
+      const url = config.url ?? '';
+      if (method === 'get' && url === '/api/v1/boards/board-1') {
+        return {
+          status: 200,
+          statusText: 'OK',
+          headers: new AxiosHeaders(),
+          config,
+          data: detail,
+        };
+      }
+      throw new Error(`Unexpected request: ${method} ${url}`);
+    };
+
+    renderBoardPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Corrigir login OAuth')).toBeInTheDocument();
+    });
+
+    await user.click(
+      screen.getByRole('button', { name: /configurações do quadro/i }),
+    );
+    const dialog = await screen.findByRole('dialog');
+    const viewSection = within(dialog).getByText('Visualização padrão').parentElement!;
+
+    const kanbanButton = within(viewSection).getByRole('button', { name: /^kanban$/i });
+    const listButton = within(viewSection).getByRole('button', { name: /^lista$/i });
+
+    expect(listButton).toHaveAttribute('aria-pressed', 'true');
+    expect(listButton).toHaveClass('dark:bg-brand-coral', 'dark:text-brand-coral-foreground');
+    expect(kanbanButton).toHaveAttribute('aria-pressed', 'false');
+
+    await user.click(kanbanButton);
+
+    expect(kanbanButton).toHaveAttribute('aria-pressed', 'true');
+    expect(kanbanButton).toHaveClass('dark:bg-brand-coral', 'dark:text-brand-coral-foreground');
+    expect(listButton).toHaveAttribute('aria-pressed', 'false');
+  });
 });
