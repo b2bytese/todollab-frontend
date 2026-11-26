@@ -1,7 +1,7 @@
-import type { Client } from '@stomp/stompjs';
+import type { Client, IFrame } from '@stomp/stompjs';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { act, render, waitFor } from '@testing-library/react';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import { toast } from 'sonner';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { boardKeys } from '@/features/boards/api';
@@ -9,6 +9,7 @@ import {
   applyBoardEventToCache,
   useBoardRealtime,
 } from '@/features/boards/useBoardRealtime';
+import * as apiModule from '@/lib/api';
 import * as stompClientModule from '@/lib/stompClient';
 import { useAuthStore } from '@/stores/authStore';
 import type {
@@ -17,6 +18,7 @@ import type {
   BoardDetail,
   BoardEvent,
   BoardMember,
+  BoardSummary,
   BoardTag,
   TaskItem,
   TaskMoveResponse,
@@ -637,5 +639,478 @@ describe('useBoardRealtime / applyBoardEventToCache', () => {
     );
 
     expect(deactivate).toHaveBeenCalledTimes(1);
+  });
+
+  it('invalidates board detail on reconnect but not on initial connect', () => {
+    let capturedOptions: stompClientModule.CreateBoardStompClientOptions | null =
+      null;
+    const activate = vi.fn();
+    const deactivate = vi.fn().mockResolvedValue(undefined);
+    vi.spyOn(stompClientModule, 'createBoardStompClient').mockImplementation(
+      (options) => {
+        capturedOptions = options;
+        return {
+          activate,
+          deactivate,
+        } as unknown as Client;
+      },
+    );
+
+    useAuthStore.setState({
+      accessToken: 'valid-token',
+      user: {
+        id: 'user-2',
+        name: 'Bruno Costa',
+        email: 'bruno@example.com',
+        avatarColor: '#FF4B4B',
+        createdAt: '2026-11-21T10:00:00Z',
+      },
+      status: 'authenticated',
+    });
+
+    const queryClient = new QueryClient();
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+
+    function TestHarness({ boardId }: { boardId: string }) {
+      useBoardRealtime(boardId, true);
+      return null;
+    }
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <TestHarness boardId="board-1" />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(capturedOptions).not.toBeNull();
+    capturedOptions!.onConnect?.();
+    expect(invalidateSpy).not.toHaveBeenCalledWith({
+      queryKey: boardKeys.detail('board-1'),
+    });
+
+    capturedOptions!.onConnect?.();
+    expect(invalidateSpy).toHaveBeenCalledTimes(1);
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: boardKeys.detail('board-1'),
+    });
+  });
+
+  it('handles onStompError by refreshing token on auth errors and redirecting on forbidden errors', async () => {
+    let capturedOptions: stompClientModule.CreateBoardStompClientOptions | null =
+      null;
+    const activate = vi.fn();
+    const deactivate = vi.fn().mockResolvedValue(undefined);
+    vi.spyOn(stompClientModule, 'createBoardStompClient').mockImplementation(
+      (options) => {
+        capturedOptions = options;
+        return {
+          activate,
+          deactivate,
+        } as unknown as Client;
+      },
+    );
+
+    const refreshSpy = vi
+      .spyOn(apiModule, 'refreshAccessToken')
+      .mockResolvedValueOnce('fresh-token')
+      .mockRejectedValueOnce(new Error('Refresh failed'));
+
+    useAuthStore.setState({
+      accessToken: 'valid-token',
+      user: {
+        id: 'user-2',
+        name: 'Bruno Costa',
+        email: 'bruno@example.com',
+        avatarColor: '#FF4B4B',
+        createdAt: '2026-11-21T10:00:00Z',
+      },
+      status: 'authenticated',
+    });
+
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(boardKeys.detail('board-1'), createInitialDetail());
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+    const removeSpy = vi.spyOn(queryClient, 'removeQueries');
+
+    function TestHarness({ boardId }: { boardId: string }) {
+      useBoardRealtime(boardId, true);
+      const location = useLocation();
+      return <div data-testid="location">{location.pathname}</div>;
+    }
+
+    const { getByTestId, rerender } = render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/app/boards/board-1']}>
+          <TestHarness boardId="board-1" />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(capturedOptions).not.toBeNull();
+
+    // 1. Auth error where refresh succeeds -> does not deactivate or redirect
+    await act(async () => {
+      capturedOptions!.onStompError?.({
+        command: 'ERROR',
+        headers: { message: 'Unauthorized' },
+        body: '',
+        isBinaryBody: false,
+        binaryBody: new Uint8Array(),
+      } as IFrame);
+    });
+
+    await waitFor(() => {
+      expect(refreshSpy).toHaveBeenCalledTimes(1);
+    });
+    expect(deactivate).not.toHaveBeenCalled();
+    expect(getByTestId('location').textContent).toBe('/app/boards/board-1');
+
+    // 2. Auth error where refresh fails -> deactivates client
+    await act(async () => {
+      capturedOptions!.onStompError?.({
+        command: 'ERROR',
+        headers: { message: 'JWT token expired' },
+        body: '',
+        isBinaryBody: false,
+        binaryBody: new Uint8Array(),
+      } as IFrame);
+    });
+
+    await waitFor(() => {
+      expect(refreshSpy).toHaveBeenCalledTimes(2);
+      expect(deactivate).toHaveBeenCalledTimes(1);
+    });
+
+    // 3. Forbidden error ('AccessDenied') -> deactivates, clears board cache, invalidates boardKeys.all, redirects
+    await act(async () => {
+      capturedOptions!.onStompError?.({
+        command: 'ERROR',
+        headers: { message: 'AccessDenied' },
+        body: '',
+        isBinaryBody: false,
+        binaryBody: new Uint8Array(),
+      } as IFrame);
+    });
+
+    await waitFor(() => {
+      expect(getByTestId('location').textContent).toBe('/app/my-tasks');
+    });
+    expect(deactivate).toHaveBeenCalledTimes(2);
+    expect(removeSpy).toHaveBeenCalledWith({
+      queryKey: boardKeys.detail('board-1'),
+    });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: boardKeys.all });
+    expect(
+      queryClient.getQueryData(boardKeys.detail('board-1')),
+    ).toBeUndefined();
+
+    // 4. Forbidden error ('Forbidden') on a new board -> resets redirect guard and redirects again
+    queryClient.setQueryData(boardKeys.detail('board-2'), createInitialDetail());
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/app/boards/board-2']}>
+          <TestHarness boardId="board-2" />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    await act(async () => {
+      capturedOptions!.onStompError?.({
+        command: 'ERROR',
+        headers: {},
+        body: 'Forbidden',
+        isBinaryBody: false,
+        binaryBody: new Uint8Array(),
+      } as IFrame);
+    });
+
+    await waitFor(() => {
+      expect(getByTestId('location').textContent).toBe('/app/my-tasks');
+    });
+    expect(removeSpy).toHaveBeenCalledWith({
+      queryKey: boardKeys.detail('board-2'),
+    });
+  });
+
+  it('suppresses toast when BOARD_DELETED or MEMBER_CHANGED actorId matches currentUserId', () => {
+    const queryClient = new QueryClient();
+    const notify = vi.fn();
+
+    queryClient.setQueryData(boardKeys.detail('board-1'), createInitialDetail());
+    const onRedirectDeleted = vi.fn();
+
+    applyBoardEventToCache(
+      queryClient,
+      {
+        type: 'BOARD_DELETED',
+        boardId: 'board-1',
+        actorId: 'user-1',
+        timestamp: '2026-11-25T12:00:00Z',
+        payload: { boardId: 'board-1' },
+      },
+      'user-1',
+      { notify, onRedirectToMyTasks: onRedirectDeleted },
+    );
+
+    expect(notify).not.toHaveBeenCalled();
+    expect(onRedirectDeleted).toHaveBeenCalledTimes(1);
+
+    queryClient.setQueryData(boardKeys.detail('board-1'), createInitialDetail());
+    const onRedirectLeft = vi.fn();
+
+    applyBoardEventToCache(
+      queryClient,
+      {
+        type: 'MEMBER_CHANGED',
+        boardId: 'board-1',
+        actorId: 'user-1',
+        timestamp: '2026-11-25T12:05:00Z',
+        payload: {
+          action: 'LEFT',
+          removedUserId: 'user-1',
+        },
+      },
+      'user-1',
+      { notify, onRedirectToMyTasks: onRedirectLeft },
+    );
+
+    expect(notify).not.toHaveBeenCalled();
+    expect(onRedirectLeft).toHaveBeenCalledTimes(1);
+  });
+
+  it('immediately reassigns tasks to targetColumnId on COLUMN_DELETED without flicker', () => {
+    const queryClient = new QueryClient();
+    const initial = createInitialDetail();
+    initial.tasks = [
+      { ...initial.tasks[0], id: 'task-1', columnId: 'col-1' },
+      { ...initial.tasks[0], id: 'task-2', columnId: 'col-2' },
+    ];
+    queryClient.setQueryData(boardKeys.detail('board-1'), initial);
+
+    applyBoardEventToCache(
+      queryClient,
+      {
+        type: 'COLUMN_DELETED',
+        boardId: 'board-1',
+        actorId: 'user-1',
+        timestamp: '2026-11-25T13:04:00Z',
+        payload: {
+          columnId: 'col-1',
+          targetColumnId: 'col-2',
+          deleteTasks: false,
+        },
+      },
+      'user-2',
+    );
+
+    const updated = queryClient.getQueryData<BoardDetail>(
+      boardKeys.detail('board-1'),
+    );
+    expect(updated?.columns.map((c) => c.id)).toEqual(['col-2']);
+    expect(updated?.tasks.find((t) => t.id === 'task-1')?.columnId).toBe(
+      'col-2',
+    );
+    expect(updated?.tasks.find((t) => t.id === 'task-2')?.columnId).toBe(
+      'col-2',
+    );
+  });
+
+  it('updates board summary counts in cache without invalidating boardKeys.all on TASK_CREATED/TASK_UPDATED/TASK_MOVED/TASK_DELETED', () => {
+    const queryClient = new QueryClient();
+    const initialDetail = createInitialDetail();
+    queryClient.setQueryData(boardKeys.detail('board-1'), initialDetail);
+
+    const summary: BoardSummary = {
+      id: 'board-1',
+      name: 'Produto V1',
+      description: 'Quadro principal',
+      color: '#0C2439',
+      icon: 'rocket',
+      defaultView: 'KANBAN',
+      myRole: 'EDITOR',
+      isFavorite: false,
+      memberCount: 2,
+      openTasksCount: 1,
+      completedTasksCount: 0,
+      membersPreview: [],
+      createdAt: '2026-11-20T10:00:00Z',
+      updatedAt: '2026-11-25T10:00:00Z',
+    };
+    queryClient.setQueryData<BoardSummary[]>(boardKeys.all, [summary]);
+
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+
+    const newTask: TaskItem = {
+      ...initialDetail.tasks[0],
+      id: 'task-2',
+      columnId: 'col-1',
+      assigneeId: 'user-3',
+      completed: false,
+    };
+
+    // TASK_CREATED
+    applyBoardEventToCache(
+      queryClient,
+      {
+        type: 'TASK_CREATED',
+        boardId: 'board-1',
+        actorId: 'user-1',
+        timestamp: '2026-11-25T14:00:00Z',
+        payload: newTask,
+      },
+      'user-2',
+    );
+
+    let boards = queryClient.getQueryData<BoardSummary[]>(boardKeys.all);
+    expect(boards?.[0].openTasksCount).toBe(2);
+    expect(boards?.[0].completedTasksCount).toBe(0);
+
+    // TASK_UPDATED
+    applyBoardEventToCache(
+      queryClient,
+      {
+        type: 'TASK_UPDATED',
+        boardId: 'board-1',
+        actorId: 'user-1',
+        timestamp: '2026-11-25T14:01:00Z',
+        payload: { ...newTask, completed: true },
+      },
+      'user-2',
+    );
+
+    boards = queryClient.getQueryData<BoardSummary[]>(boardKeys.all);
+    expect(boards?.[0].openTasksCount).toBe(1);
+    expect(boards?.[0].completedTasksCount).toBe(1);
+
+    // TASK_MOVED
+    applyBoardEventToCache(
+      queryClient,
+      {
+        type: 'TASK_MOVED',
+        boardId: 'board-1',
+        actorId: 'user-1',
+        timestamp: '2026-11-25T14:02:00Z',
+        payload: {
+          task: {
+            ...initialDetail.tasks[0],
+            columnId: 'col-2',
+            completed: true,
+          },
+          rebalanced: false,
+          columnPositions: [{ id: 'task-1', position: 1000 }],
+        },
+      },
+      'user-2',
+    );
+
+    boards = queryClient.getQueryData<BoardSummary[]>(boardKeys.all);
+    expect(boards?.[0].openTasksCount).toBe(0);
+    expect(boards?.[0].completedTasksCount).toBe(2);
+
+    // TASK_DELETED
+    applyBoardEventToCache(
+      queryClient,
+      {
+        type: 'TASK_DELETED',
+        boardId: 'board-1',
+        actorId: 'user-1',
+        timestamp: '2026-11-25T14:03:00Z',
+        payload: { taskId: 'task-2' },
+      },
+      'user-2',
+    );
+
+    boards = queryClient.getQueryData<BoardSummary[]>(boardKeys.all);
+    expect(boards?.[0].openTasksCount).toBe(0);
+    expect(boards?.[0].completedTasksCount).toBe(1);
+
+    expect(invalidateSpy).not.toHaveBeenCalledWith({
+      queryKey: boardKeys.all,
+    });
+    expect(invalidateSpy).not.toHaveBeenCalledWith({
+      queryKey: boardKeys.myTasksRoot,
+    });
+  });
+
+  it('invalidates boardKeys.myTasksRoot only for events involving currentUserId or board/column/self-removal events', () => {
+    const queryClient = new QueryClient();
+    const initial = createInitialDetail();
+    queryClient.setQueryData(boardKeys.detail('board-1'), initial);
+
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+
+    const otherTask: TaskItem = {
+      ...initial.tasks[0],
+      id: 'task-other',
+      assigneeId: 'user-3',
+    };
+    applyBoardEventToCache(
+      queryClient,
+      {
+        type: 'TASK_CREATED',
+        boardId: 'board-1',
+        actorId: 'user-1',
+        timestamp: '2026-11-25T15:00:00Z',
+        payload: otherTask,
+      },
+      'user-2',
+    );
+    expect(invalidateSpy).not.toHaveBeenCalledWith({
+      queryKey: boardKeys.myTasksRoot,
+    });
+
+    applyBoardEventToCache(
+      queryClient,
+      {
+        type: 'TASK_UPDATED',
+        boardId: 'board-1',
+        actorId: 'user-1',
+        timestamp: '2026-11-25T15:01:00Z',
+        payload: { ...otherTask, assigneeId: 'user-2' },
+      },
+      'user-2',
+    );
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: boardKeys.myTasksRoot,
+    });
+
+    invalidateSpy.mockClear();
+
+    applyBoardEventToCache(
+      queryClient,
+      {
+        type: 'TASK_UPDATED',
+        boardId: 'board-1',
+        actorId: 'user-1',
+        timestamp: '2026-11-25T15:02:00Z',
+        payload: { ...otherTask, assigneeId: null },
+      },
+      'user-2',
+    );
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: boardKeys.myTasksRoot,
+    });
+
+    invalidateSpy.mockClear();
+
+    applyBoardEventToCache(
+      queryClient,
+      {
+        type: 'COLUMN_REORDERED',
+        boardId: 'board-1',
+        actorId: 'user-1',
+        timestamp: '2026-11-25T15:03:00Z',
+        payload: { columns: initial.columns },
+      },
+      'user-2',
+    );
+    expect(invalidateSpy).not.toHaveBeenCalledWith({
+      queryKey: boardKeys.myTasksRoot,
+    });
+    expect(invalidateSpy).not.toHaveBeenCalledWith({
+      queryKey: boardKeys.all,
+    });
   });
 });

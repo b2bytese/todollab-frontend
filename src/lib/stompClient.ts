@@ -5,11 +5,49 @@ import {
   type IMessage,
   type StompSubscription,
 } from '@stomp/stompjs';
+import { API_BASE_URL } from '@/lib/api';
 import type { BoardEvent } from '@/types/api';
 
-export const WS_BASE_URL =
-  (import.meta.env.VITE_WS_URL as string | undefined)?.trim() ||
-  'ws://localhost:8080/ws';
+/**
+ * Resolves the WebSocket broker URL from an explicit override or the API base URL.
+ */
+export function resolveWsBaseUrl(
+  rawWsUrl?: string,
+  apiBaseUrl = API_BASE_URL,
+  isProd = import.meta.env.PROD,
+): string {
+  const trimmedWs = rawWsUrl?.trim();
+  if (trimmedWs) {
+    return trimmedWs;
+  }
+
+  const normalizedApi = apiBaseUrl.trim().replace(/\/+$/, '');
+  if (/^https:\/\//i.test(normalizedApi)) {
+    return `${normalizedApi.replace(/^https:\/\//i, 'wss://')}/ws`;
+  }
+  if (/^http:\/\//i.test(normalizedApi)) {
+    return `${normalizedApi.replace(/^http:\/\//i, 'ws://')}/ws`;
+  }
+  if (/^wss?:\/\//i.test(normalizedApi)) {
+    return normalizedApi.endsWith('/ws')
+      ? normalizedApi
+      : `${normalizedApi}/ws`;
+  }
+
+  if (isProd) {
+    if (typeof window !== 'undefined' && window.location?.host) {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      return `${protocol}//${window.location.host}/ws`;
+    }
+    return '/ws';
+  }
+
+  return 'ws://localhost:8080/ws';
+}
+
+export const WS_BASE_URL = resolveWsBaseUrl(
+  import.meta.env.VITE_WS_URL as string | undefined,
+);
 
 export const INITIAL_RECONNECT_DELAY_MS = 1000;
 export const MAX_RECONNECT_DELAY_MS = 30000;
@@ -76,12 +114,15 @@ export function createBoardStompClient({
         try {
           token = await refreshToken();
         } catch {
-          // Leave existing token (if any) so STOMP error/close handles reconnect or auth clears
+          token = getAccessToken();
         }
       }
-      client.connectHeaders = token
-        ? { Authorization: `Bearer ${token}` }
-        : {};
+      if (!token) {
+        client.connectHeaders = {};
+        void client.deactivate();
+        return;
+      }
+      client.connectHeaders = { Authorization: `Bearer ${token}` };
     },
     onConnect: () => {
       subscription?.unsubscribe();

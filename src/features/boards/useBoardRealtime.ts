@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import type { Client, IFrame } from '@stomp/stompjs';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -12,6 +13,7 @@ import type {
   BoardDetail,
   BoardEvent,
   BoardMember,
+  BoardSummary,
   BoardTag,
   TaskItem,
   TaskMoveResponse,
@@ -92,6 +94,78 @@ function isTaskItem(payload: unknown): payload is TaskItem {
   );
 }
 
+/**
+ * Synchronizes open/completed task counts in the cached boards list from the cached board detail.
+ */
+function syncBoardSummaryCounts(
+  queryClient: QueryClient,
+  boardId: string,
+): void {
+  const detail = queryClient.getQueryData<BoardDetail>(
+    boardKeys.detail(boardId),
+  );
+  if (!detail) {
+    return;
+  }
+
+  let openTasksCount = 0;
+  let completedTasksCount = 0;
+  for (const task of detail.tasks) {
+    if (task.completed) {
+      completedTasksCount += 1;
+    } else {
+      openTasksCount += 1;
+    }
+  }
+
+  queryClient.setQueryData<BoardSummary[]>(boardKeys.all, (boards) => {
+    if (!boards) {
+      return boards;
+    }
+    return boards.map((board) =>
+      board.id === boardId
+        ? { ...board, openTasksCount, completedTasksCount }
+        : board,
+    );
+  });
+}
+
+function taskInvolvesUser(
+  previousTasks: TaskItem[] | undefined,
+  taskId: string,
+  nextAssigneeId: string | null | undefined,
+  currentUserId: string | null | undefined,
+): boolean {
+  if (!currentUserId) {
+    return false;
+  }
+  if (nextAssigneeId === currentUserId) {
+    return true;
+  }
+  const previousTask = previousTasks?.find((t) => t.id === taskId);
+  return previousTask?.assigneeId === currentUserId;
+}
+
+function isStompAuthError(errorText: string): boolean {
+  return (
+    errorText.includes('401') ||
+    errorText.includes('unauth') ||
+    errorText.includes('jwt') ||
+    errorText.includes('token') ||
+    errorText.includes('expired')
+  );
+}
+
+function isStompForbiddenError(errorText: string): boolean {
+  return (
+    errorText.includes('403') ||
+    errorText.includes('forbidden') ||
+    errorText.includes('access denied') ||
+    errorText.includes('accessdenied') ||
+    errorText.includes('not a member')
+  );
+}
+
 export function applyBoardEventToCache(
   queryClient: QueryClient,
   event: BoardEvent,
@@ -100,12 +174,17 @@ export function applyBoardEventToCache(
 ): void {
   const notify = callbacks?.notify ?? ((msg: string) => toast.info(msg));
   const detailKey = boardKeys.detail(event.boardId);
+  const isSelfActor = Boolean(
+    currentUserId && event.actorId && event.actorId === currentUserId,
+  );
 
   if (event.type === 'BOARD_DELETED') {
     queryClient.removeQueries({ queryKey: detailKey });
     void queryClient.invalidateQueries({ queryKey: boardKeys.all });
-    void queryClient.invalidateQueries({ queryKey: boardKeys.myTasks() });
-    notify('Este quadro foi excluído.');
+    void queryClient.invalidateQueries({ queryKey: boardKeys.myTasksRoot });
+    if (!isSelfActor) {
+      notify('Este quadro foi excluído.');
+    }
     callbacks?.onRedirectToMyTasks?.();
     return;
   }
@@ -119,12 +198,14 @@ export function applyBoardEventToCache(
     ) {
       queryClient.removeQueries({ queryKey: detailKey });
       void queryClient.invalidateQueries({ queryKey: boardKeys.all });
-      void queryClient.invalidateQueries({ queryKey: boardKeys.myTasks() });
-      notify(
-        payload.action === 'LEFT'
-          ? 'Você saiu do quadro.'
-          : 'Você foi removido deste quadro.',
-      );
+      void queryClient.invalidateQueries({ queryKey: boardKeys.myTasksRoot });
+      if (!isSelfActor) {
+        notify(
+          payload.action === 'LEFT'
+            ? 'Você saiu do quadro.'
+            : 'Você foi removido deste quadro.',
+        );
+      }
       callbacks?.onRedirectToMyTasks?.();
       return;
     }
@@ -205,7 +286,7 @@ export function applyBoardEventToCache(
         current ? { ...current, board: updatedBoard } : current,
       );
       void queryClient.invalidateQueries({ queryKey: boardKeys.all });
-      void queryClient.invalidateQueries({ queryKey: boardKeys.myTasks() });
+      void queryClient.invalidateQueries({ queryKey: boardKeys.myTasksRoot });
       break;
     }
 
@@ -223,7 +304,7 @@ export function applyBoardEventToCache(
         };
       });
       if (event.type === 'COLUMN_UPDATED') {
-        void queryClient.invalidateQueries({ queryKey: boardKeys.myTasks() });
+        void queryClient.invalidateQueries({ queryKey: boardKeys.myTasksRoot });
       }
       break;
     }
@@ -232,19 +313,30 @@ export function applyBoardEventToCache(
       const payload = (event.payload ?? {}) as ColumnDeletedPayload;
       queryClient.setQueryData<BoardDetail>(detailKey, (current) => {
         if (!current) return current;
+        let nextTasks = current.tasks;
+        if (payload.deleteTasks) {
+          nextTasks = current.tasks.filter(
+            (t) => t.columnId !== payload.columnId,
+          );
+        } else if (payload.targetColumnId) {
+          const targetColumnId = payload.targetColumnId;
+          nextTasks = current.tasks.map((t) =>
+            t.columnId === payload.columnId
+              ? { ...t, columnId: targetColumnId }
+              : t,
+          );
+        }
         return {
           ...current,
           columns: current.columns.filter((c) => c.id !== payload.columnId),
-          tasks: payload.deleteTasks
-            ? current.tasks.filter((t) => t.columnId !== payload.columnId)
-            : current.tasks,
+          tasks: nextTasks,
         };
       });
       if (payload.targetColumnId) {
         void queryClient.invalidateQueries({ queryKey: detailKey });
       }
-      void queryClient.invalidateQueries({ queryKey: boardKeys.all });
-      void queryClient.invalidateQueries({ queryKey: boardKeys.myTasks() });
+      syncBoardSummaryCounts(queryClient, event.boardId);
+      void queryClient.invalidateQueries({ queryKey: boardKeys.myTasksRoot });
       break;
     }
 
@@ -265,6 +357,14 @@ export function applyBoardEventToCache(
           current ? { ...current, columns: sortedColumns } : current,
         );
       } else if (isTaskMoveResponse(payload)) {
+        const previousTasks =
+          queryClient.getQueryData<BoardDetail>(detailKey)?.tasks;
+        const involvesUser = taskInvolvesUser(
+          previousTasks,
+          payload.task.id,
+          payload.task.assigneeId,
+          currentUserId,
+        );
         queryClient.setQueryData<BoardDetail>(detailKey, (current) =>
           current
             ? {
@@ -273,29 +373,58 @@ export function applyBoardEventToCache(
               }
             : current,
         );
+        syncBoardSummaryCounts(queryClient, event.boardId);
+        if (involvesUser) {
+          void queryClient.invalidateQueries({
+            queryKey: boardKeys.myTasksRoot,
+          });
+        }
       } else {
         void queryClient.invalidateQueries({ queryKey: detailKey });
       }
-      void queryClient.invalidateQueries({ queryKey: boardKeys.all });
-      void queryClient.invalidateQueries({ queryKey: boardKeys.myTasks() });
       break;
     }
 
     case 'TASK_CREATED':
     case 'TASK_UPDATED': {
       const task = event.payload as TaskItem;
+      const previousTasks =
+        queryClient.getQueryData<BoardDetail>(detailKey)?.tasks;
+      const involvesUser = taskInvolvesUser(
+        previousTasks,
+        task.id,
+        task.assigneeId,
+        currentUserId,
+      );
       queryClient.setQueryData<BoardDetail>(detailKey, (current) =>
         current
           ? { ...current, tasks: upsertById(current.tasks, task) }
           : current,
       );
-      void queryClient.invalidateQueries({ queryKey: boardKeys.all });
-      void queryClient.invalidateQueries({ queryKey: boardKeys.myTasks() });
+      syncBoardSummaryCounts(queryClient, event.boardId);
+      if (involvesUser) {
+        void queryClient.invalidateQueries({ queryKey: boardKeys.myTasksRoot });
+      }
       break;
     }
 
     case 'TASK_MOVED': {
       const payload = event.payload;
+      const movedTask = isTaskMoveResponse(payload)
+        ? payload.task
+        : isTaskItem(payload)
+          ? payload
+          : null;
+      const previousTasks =
+        queryClient.getQueryData<BoardDetail>(detailKey)?.tasks;
+      const involvesUser = movedTask
+        ? taskInvolvesUser(
+            previousTasks,
+            movedTask.id,
+            movedTask.assigneeId,
+            currentUserId,
+          )
+        : false;
       queryClient.setQueryData<BoardDetail>(detailKey, (current) => {
         if (!current) return current;
         if (isTaskMoveResponse(payload)) {
@@ -312,13 +441,23 @@ export function applyBoardEventToCache(
         }
         return current;
       });
-      void queryClient.invalidateQueries({ queryKey: boardKeys.all });
-      void queryClient.invalidateQueries({ queryKey: boardKeys.myTasks() });
+      syncBoardSummaryCounts(queryClient, event.boardId);
+      if (involvesUser) {
+        void queryClient.invalidateQueries({ queryKey: boardKeys.myTasksRoot });
+      }
       break;
     }
 
     case 'TASK_DELETED': {
       const payload = (event.payload ?? {}) as TaskDeletedPayload;
+      const previousTasks =
+        queryClient.getQueryData<BoardDetail>(detailKey)?.tasks;
+      const involvesUser = taskInvolvesUser(
+        previousTasks,
+        payload.taskId,
+        null,
+        currentUserId,
+      );
       queryClient.setQueryData<BoardDetail>(detailKey, (current) =>
         current
           ? {
@@ -327,8 +466,10 @@ export function applyBoardEventToCache(
             }
           : current,
       );
-      void queryClient.invalidateQueries({ queryKey: boardKeys.all });
-      void queryClient.invalidateQueries({ queryKey: boardKeys.myTasks() });
+      syncBoardSummaryCounts(queryClient, event.boardId);
+      if (involvesUser) {
+        void queryClient.invalidateQueries({ queryKey: boardKeys.myTasksRoot });
+      }
       break;
     }
 
@@ -368,12 +509,16 @@ export function useBoardRealtime(
 ) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
   const status = useAuthStore((s) => s.status);
   const currentUserId = useAuthStore((s) => s.user?.id ?? null);
   const redirectedRef = useRef(false);
+  const hasConnectedOnceRef = useRef(false);
 
   useEffect(() => {
     redirectedRef.current = false;
+    hasConnectedOnceRef.current = false;
   }, [boardId]);
 
   useEffect(() => {
@@ -381,27 +526,55 @@ export function useBoardRealtime(
       return;
     }
 
-    const client = createBoardStompClient({
+    const redirectToMyTasks = () => {
+      if (redirectedRef.current) {
+        return;
+      }
+      redirectedRef.current = true;
+      navigateRef.current('/app/my-tasks', { replace: true });
+    };
+
+    let client: Client | null = null;
+    client = createBoardStompClient({
       boardId,
       getAccessToken: () => useAuthStore.getState().accessToken,
       refreshToken: refreshAccessToken,
       onEvent: (event) => {
         applyBoardEventToCache(queryClient, event, currentUserId, {
-          onRedirectToMyTasks: () => {
-            if (redirectedRef.current) {
-              return;
-            }
-            redirectedRef.current = true;
-            navigate('/app/my-tasks', { replace: true });
-          },
+          onRedirectToMyTasks: redirectToMyTasks,
         });
+      },
+      onConnect: () => {
+        if (!hasConnectedOnceRef.current) {
+          hasConnectedOnceRef.current = true;
+          return;
+        }
+        void queryClient.invalidateQueries({
+          queryKey: boardKeys.detail(boardId),
+        });
+      },
+      onStompError: (frame: IFrame) => {
+        const errorText =
+          `${frame.headers?.message ?? ''} ${frame.body ?? ''}`.toLowerCase();
+        if (isStompAuthError(errorText)) {
+          void refreshAccessToken().catch(() => {
+            void client?.deactivate();
+          });
+          return;
+        }
+        if (isStompForbiddenError(errorText)) {
+          void client?.deactivate();
+          queryClient.removeQueries({ queryKey: boardKeys.detail(boardId) });
+          void queryClient.invalidateQueries({ queryKey: boardKeys.all });
+          redirectToMyTasks();
+        }
       },
     });
 
     client.activate();
 
     return () => {
-      void client.deactivate();
+      void client?.deactivate();
     };
-  }, [boardId, currentUserId, enabled, navigate, queryClient, status]);
+  }, [boardId, currentUserId, enabled, queryClient, status]);
 }
