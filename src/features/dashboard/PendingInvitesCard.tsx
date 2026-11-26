@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { Check, Loader2, Mail, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -8,14 +8,12 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { boardKeys, usePendingInvitesQuery } from '@/features/boards/api';
 import { BoardIcon } from '@/features/boards/boardIcons';
-import { api, getApiError } from '@/lib/api';
-import type { AcceptInviteResponse, BoardRole, PendingInvite } from '@/types/api';
-
-const ROLE_LABELS: Record<BoardRole, string> = {
-  OWNER: 'Proprietário',
-  EDITOR: 'Editor',
-  VIEWER: 'Visualizador',
-};
+import {
+  useAcceptInviteMutation,
+  useDeclineInviteMutation,
+} from '@/features/invites/api';
+import { getRoleLabel } from '@/lib/taskMeta';
+import type { PendingInvite } from '@/types/api';
 
 export function PendingInvitesCard() {
   const navigate = useNavigate();
@@ -26,55 +24,41 @@ export function PendingInvitesCard() {
     type: 'accept' | 'decline';
   } | null>(null);
 
-  const acceptMutation = useMutation({
-    mutationFn: async (invite: PendingInvite) => {
-      const { data } = await api.post<AcceptInviteResponse>(
-        `/api/v1/invites/${invite.token}/accept`,
-      );
-      return { data, invite };
-    },
-    onMutate: (invite) => {
-      setPendingAction({ token: invite.token, type: 'accept' });
-    },
-    onSuccess: ({ data, invite }) => {
-      queryClient.setQueryData<PendingInvite[]>(boardKeys.myInvites, (prev) =>
-        prev ? prev.filter((item) => item.token !== invite.token) : prev,
-      );
-      void queryClient.invalidateQueries({ queryKey: boardKeys.all });
-      void queryClient.invalidateQueries({ queryKey: boardKeys.myInvites });
-      toast.success(`Convite aceito! Bem-vindo ao quadro "${invite.boardName}".`);
-      navigate(`/app/boards/${data.boardId}`);
-    },
-    onError: (err) => {
-      toast.error(getApiError(err).detail ?? 'Não foi possível aceitar o convite.');
-    },
-    onSettled: () => {
-      setPendingAction(null);
-    },
-  });
+  const acceptMutation = useAcceptInviteMutation();
+  const declineMutation = useDeclineInviteMutation();
 
-  const declineMutation = useMutation({
-    mutationFn: async (invite: PendingInvite) => {
-      await api.post(`/api/v1/invites/${invite.token}/decline`);
-      return invite;
-    },
-    onMutate: (invite) => {
-      setPendingAction({ token: invite.token, type: 'decline' });
-    },
-    onSuccess: (invite) => {
-      queryClient.setQueryData<PendingInvite[]>(boardKeys.myInvites, (prev) =>
-        prev ? prev.filter((item) => item.token !== invite.token) : prev,
-      );
-      void queryClient.invalidateQueries({ queryKey: boardKeys.myInvites });
-      toast.info(`Convite para "${invite.boardName}" recusado.`);
-    },
-    onError: (err) => {
-      toast.error(getApiError(err).detail ?? 'Não foi possível recusar o convite.');
-    },
-    onSettled: () => {
-      setPendingAction(null);
-    },
-  });
+  const handleAccept = (invite: PendingInvite) => {
+    setPendingAction({ token: invite.token, type: 'accept' });
+    acceptMutation.mutate(invite.token, {
+      onSuccess: (data) => {
+        queryClient.setQueryData<PendingInvite[]>(boardKeys.myInvites, (prev) =>
+          prev ? prev.filter((item) => item.token !== invite.token) : prev,
+        );
+        toast.success(
+          `Convite aceito! Bem-vindo ao quadro "${invite.boardName}".`,
+        );
+        navigate(`/app/boards/${data.boardId}`);
+      },
+      onSettled: () => {
+        setPendingAction(null);
+      },
+    });
+  };
+
+  const handleDecline = (invite: PendingInvite) => {
+    setPendingAction({ token: invite.token, type: 'decline' });
+    declineMutation.mutate(invite.token, {
+      onSuccess: () => {
+        queryClient.setQueryData<PendingInvite[]>(boardKeys.myInvites, (prev) =>
+          prev ? prev.filter((item) => item.token !== invite.token) : prev,
+        );
+        toast.info(`Convite para "${invite.boardName}" recusado.`);
+      },
+      onSettled: () => {
+        setPendingAction(null);
+      },
+    });
+  };
 
   if (isLoading || invites.length === 0) {
     return null;
@@ -125,7 +109,7 @@ export function PendingInvitesCard() {
                         {invite.boardName}
                       </p>
                       <Badge variant="secondary" className="text-[11px]">
-                        {ROLE_LABELS[invite.role]}
+                        {getRoleLabel(invite.role)}
                       </Badge>
                     </div>
                     <p className="truncate text-xs text-muted-foreground">
@@ -140,7 +124,7 @@ export function PendingInvitesCard() {
                     size="sm"
                     variant="outline"
                     disabled={isBusy}
-                    onClick={() => declineMutation.mutate(invite)}
+                    onClick={() => handleDecline(invite)}
                   >
                     {isDeclining ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
@@ -154,7 +138,7 @@ export function PendingInvitesCard() {
                     size="sm"
                     variant="coral"
                     disabled={isBusy}
-                    onClick={() => acceptMutation.mutate(invite)}
+                    onClick={() => handleAccept(invite)}
                   >
                     {isAccepting ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />

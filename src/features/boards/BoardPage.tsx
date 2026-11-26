@@ -31,27 +31,25 @@ export function BoardPage() {
 
   useBoardRealtime(boardId, Boolean(detail));
 
-  const [activeView, setActiveView] = useState<BoardView>('LIST');
-  const [initializedBoardId, setInitializedBoardId] = useState<string | null>(
-    null,
-  );
+  const [viewOverrideState, setViewOverrideState] = useState<{
+    boardId: string | undefined;
+    view: BoardView;
+  } | null>(null);
   const [filters, setFilters] = useState<BoardFilters>(DEFAULT_BOARD_FILTERS);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
 
+  const viewOverride =
+    viewOverrideState && viewOverrideState.boardId === boardId
+      ? viewOverrideState.view
+      : null;
+
   useEffect(() => {
-    setInitializedBoardId(null);
+    setViewOverrideState(null);
     setFilters(DEFAULT_BOARD_FILTERS);
     setSettingsOpen(false);
     setShareOpen(false);
   }, [boardId]);
-
-  useEffect(() => {
-    if (detail && initializedBoardId !== detail.board.id) {
-      setActiveView(detail.board.defaultView);
-      setInitializedBoardId(detail.board.id);
-    }
-  }, [detail, initializedBoardId]);
 
   const selectedTaskId = searchParams.get('task');
 
@@ -61,6 +59,44 @@ export function BoardPage() {
     }
     return detail.tasks.find((task) => task.id === selectedTaskId) ?? null;
   }, [detail, selectedTaskId]);
+
+  useEffect(() => {
+    if (detail && selectedTaskId && !selectedTask) {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.delete('task');
+          return next;
+        },
+        { replace: true },
+      );
+    }
+  }, [detail, selectedTaskId, selectedTask, setSearchParams]);
+
+  useEffect(() => {
+    if (!detail) {
+      return;
+    }
+    setFilters((prev) => {
+      const invalidAssignee =
+        prev.assigneeId !== 'ALL' &&
+        prev.assigneeId !== 'UNASSIGNED' &&
+        !detail.members.some((member) => member.userId === prev.assigneeId);
+      const invalidTag =
+        prev.tagId !== 'ALL' &&
+        !detail.tags.some((tag) => tag.id === prev.tagId);
+
+      if (!invalidAssignee && !invalidTag) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        assigneeId: invalidAssignee ? 'ALL' : prev.assigneeId,
+        tagId: invalidTag ? 'ALL' : prev.tagId,
+      };
+    });
+  }, [detail]);
 
   const filteredTasks = useMemo(() => {
     if (!detail) {
@@ -151,6 +187,7 @@ export function BoardPage() {
 
   const canEdit = detail.myRole === 'OWNER' || detail.myRole === 'EDITOR';
   const isOwner = detail.myRole === 'OWNER';
+  const activeView = viewOverride ?? detail.board.defaultView;
   const filtersActive = hasActiveBoardFilters(filters);
 
   return (
@@ -161,11 +198,10 @@ export function BoardPage() {
       <BoardHeader
         detail={detail}
         activeView={activeView}
-        onChangeView={setActiveView}
+        onChangeView={(view) => setViewOverrideState({ boardId, view })}
         onOpenShare={handleOpenShare}
         onOpenSettings={() => setSettingsOpen(true)}
         canEdit={canEdit}
-        isOwner={isOwner}
       />
 
       <BoardFilterBar

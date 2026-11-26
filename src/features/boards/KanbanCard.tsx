@@ -1,32 +1,13 @@
-import { type CSSProperties } from 'react';
+import { useEffect, useRef, type CSSProperties, type Ref } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { Calendar, GripVertical, ListChecks } from 'lucide-react';
 import { UserAvatar } from '@/components/common/UserAvatar';
 import { Badge } from '@/components/ui/badge';
-import { PRIORITY_META } from '@/features/boards/BoardFilterBar';
+import { formatLocalDueDate, getLocalTodayIso } from '@/lib/date';
+import { getPriorityMeta } from '@/lib/taskMeta';
 import { cn } from '@/lib/utils';
 import type { BoardMember, BoardTag, TaskItem } from '@/types/api';
-
-function getLocalTodayIso(now: Date = new Date()): string {
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-function formatDueDate(dueDate: string): string {
-  const parts = dueDate.split('-').map(Number);
-  if (parts.length !== 3 || parts.some(Number.isNaN)) {
-    return dueDate;
-  }
-  const [year, month, day] = parts;
-  const localDate = new Date(year, month - 1, day);
-  return new Intl.DateTimeFormat('pt-BR', {
-    day: '2-digit',
-    month: 'short',
-  }).format(localDate);
-}
 
 export interface KanbanCardPreviewProps {
   task: TaskItem;
@@ -37,6 +18,7 @@ export interface KanbanCardPreviewProps {
   isOverlay?: boolean;
   onSelectTask?: (taskId: string) => void;
   dragHandleProps?: React.ButtonHTMLAttributes<HTMLButtonElement>;
+  dragHandleRef?: Ref<HTMLButtonElement>;
 }
 
 export function KanbanCardPreview({
@@ -48,8 +30,9 @@ export function KanbanCardPreview({
   isOverlay = false,
   onSelectTask,
   dragHandleProps,
+  dragHandleRef,
 }: KanbanCardPreviewProps) {
-  const priorityMeta = PRIORITY_META[task.priority];
+  const priorityMeta = getPriorityMeta(task.priority);
   const assignee = task.assigneeId
     ? membersByUserId.get(task.assigneeId)
     : undefined;
@@ -97,6 +80,7 @@ export function KanbanCardPreview({
 
         <button
           type="button"
+          ref={dragHandleRef}
           disabled={!canEdit}
           aria-label={`Arrastar tarefa ${task.title}`}
           {...dragHandleProps}
@@ -155,7 +139,7 @@ export function KanbanCardPreview({
               )}
             >
               <Calendar className="h-3 w-3" aria-hidden="true" />
-              {formatDueDate(task.dueDate)}
+              {formatLocalDueDate(task.dueDate)}
             </span>
           ) : null}
 
@@ -201,6 +185,7 @@ export function KanbanCard({
     attributes,
     listeners,
     setNodeRef,
+    setActivatorNodeRef,
     transform,
     transition,
     isDragging,
@@ -212,6 +197,29 @@ export function KanbanCard({
       task,
     },
   });
+
+  const wasDraggingRef = useRef(false);
+
+  useEffect(() => {
+    if (isDragging) {
+      wasDraggingRef.current = true;
+      return;
+    }
+    if (!wasDraggingRef.current) {
+      return;
+    }
+    const timerId = window.setTimeout(() => {
+      wasDraggingRef.current = false;
+    }, 0);
+    return () => window.clearTimeout(timerId);
+  }, [isDragging]);
+
+  const handleSelectTask = () => {
+    if (isDragging || wasDraggingRef.current) {
+      return;
+    }
+    onSelectTask(task.id);
+  };
 
   const style: CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -233,11 +241,7 @@ export function KanbanCard({
           handler?.(event);
         }
       }}
-      onClick={() => {
-        if (!isDragging) {
-          onSelectTask(task.id);
-        }
-      }}
+      onClick={handleSelectTask}
     >
       <KanbanCardPreview
         task={task}
@@ -245,7 +249,8 @@ export function KanbanCard({
         membersByUserId={membersByUserId}
         canEdit={canEdit}
         isDragging={isDragging}
-        onSelectTask={onSelectTask}
+        onSelectTask={handleSelectTask}
+        dragHandleRef={setActivatorNodeRef}
         dragHandleProps={{
           ...attributes,
           onKeyDown: canEdit

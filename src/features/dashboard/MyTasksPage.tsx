@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Badge, type BadgeProps } from '@/components/ui/badge';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -24,6 +24,8 @@ import { BoardIcon } from '@/features/boards/boardIcons';
 import { PendingInvitesCard } from '@/features/dashboard/PendingInvitesCard';
 import { CreateBoardDialog } from '@/features/shell/CreateBoardDialog';
 import { api, getApiError } from '@/lib/api';
+import { formatLocalDueDate, getLocalTodayIso } from '@/lib/date';
+import { getPriorityMeta } from '@/lib/taskMeta';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/authStore';
 import type { MyTaskItem, TaskPriority } from '@/types/api';
@@ -44,36 +46,6 @@ const PRIORITY_OPTIONS: readonly { value: PriorityFilter; label: string }[] = [
   { value: 'MEDIUM', label: 'Média' },
   { value: 'LOW', label: 'Baixa' },
 ];
-
-const PRIORITY_META: Record<
-  TaskPriority,
-  { label: string; variant: BadgeProps['variant'] }
-> = {
-  URGENT: { label: 'Urgente', variant: 'coral' },
-  HIGH: { label: 'Alta', variant: 'warning' },
-  MEDIUM: { label: 'Média', variant: 'secondary' },
-  LOW: { label: 'Baixa', variant: 'outline' },
-};
-
-function getLocalTodayIso(now: Date = new Date()): string {
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-function formatLocalDueDate(dueDate: string): string {
-  const parts = dueDate.split('-').map(Number);
-  if (parts.length !== 3 || parts.some(Number.isNaN)) {
-    return dueDate;
-  }
-  const [year, month, day] = parts;
-  const localDate = new Date(year, month - 1, day);
-  return new Intl.DateTimeFormat('pt-BR', {
-    day: '2-digit',
-    month: 'short',
-  }).format(localDate);
-}
 
 interface TaskBuckets {
   overdue: MyTaskItem[];
@@ -399,7 +371,7 @@ export function MyTasksPage() {
                       task.dueDate !== null &&
                       task.dueDate < todayIso &&
                       !task.completed;
-                    const priorityMeta = PRIORITY_META[task.priority];
+                    const priorityMeta = getPriorityMeta(task.priority);
 
                     return (
                       <div

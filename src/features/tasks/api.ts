@@ -1,3 +1,4 @@
+import { useRef } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { boardKeys } from '@/features/boards/api';
@@ -340,6 +341,8 @@ export function useToggleTaskCompleteMutation(boardId: string) {
 
 export function useMoveTaskMutation(boardId: string) {
   const queryClient = useQueryClient();
+  const taskMoveSeqRef = useRef<Map<string, number>>(new Map());
+  const inFlightRef = useRef(0);
 
   return useMutation({
     mutationFn: async ({
@@ -354,12 +357,19 @@ export function useMoveTaskMutation(boardId: string) {
       return data;
     },
     onMutate: async ({ taskId, targetColumnId, position }) => {
+      inFlightRef.current += 1;
+      const seq = (taskMoveSeqRef.current.get(taskId) ?? 0) + 1;
+      taskMoveSeqRef.current.set(taskId, seq);
+
       await queryClient.cancelQueries({ queryKey: boardKeys.detail(boardId) });
       const previousDetail = queryClient.getQueryData<BoardDetail>(
         boardKeys.detail(boardId),
       );
+      const previousTask = previousDetail?.tasks.find(
+        (task) => task.id === taskId,
+      );
 
-      if (previousDetail) {
+      if (previousDetail && taskMoveSeqRef.current.get(taskId) === seq) {
         const targetColumn = previousDetail.columns.find(
           (c) => c.id === targetColumnId,
         );
@@ -389,20 +399,34 @@ export function useMoveTaskMutation(boardId: string) {
         });
       }
 
-      return { previousDetail };
+      return { previousTask, seq, taskId };
     },
-    onError: (err, _variables, context) => {
-      if (context?.previousDetail) {
-        queryClient.setQueryData(
+    onError: (err, variables, context) => {
+      const previousTask = context?.previousTask;
+      if (
+        previousTask &&
+        taskMoveSeqRef.current.get(variables.taskId) === context?.seq
+      ) {
+        const current = queryClient.getQueryData<BoardDetail>(
           boardKeys.detail(boardId),
-          context.previousDetail,
         );
+        if (current) {
+          queryClient.setQueryData<BoardDetail>(boardKeys.detail(boardId), {
+            ...current,
+            tasks: current.tasks.map((task) =>
+              task.id === variables.taskId ? previousTask : task,
+            ),
+          });
+        }
       }
       toast.error(
         getApiError(err).detail ?? 'Não foi possível mover a tarefa.',
       );
     },
-    onSuccess: (moveResult) => {
+    onSuccess: (moveResult, variables, context) => {
+      if (taskMoveSeqRef.current.get(variables.taskId) !== context?.seq) {
+        return;
+      }
       const current = queryClient.getQueryData<BoardDetail>(
         boardKeys.detail(boardId),
       );
@@ -423,9 +447,12 @@ export function useMoveTaskMutation(boardId: string) {
       }
     },
     onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: boardKeys.detail(boardId) });
-      void queryClient.invalidateQueries({ queryKey: boardKeys.all });
-      void queryClient.invalidateQueries({ queryKey: boardKeys.myTasks() });
+      inFlightRef.current = Math.max(0, inFlightRef.current - 1);
+      if (inFlightRef.current === 0) {
+        void queryClient.invalidateQueries({ queryKey: boardKeys.detail(boardId) });
+        void queryClient.invalidateQueries({ queryKey: boardKeys.all, exact: true });
+        void queryClient.invalidateQueries({ queryKey: boardKeys.myTasks() });
+      }
     },
   });
 }

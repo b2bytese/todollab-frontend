@@ -5,9 +5,31 @@ import axios, {
 import { useAuthStore } from '@/stores/authStore';
 import type { AuthResponse, ProblemDetail } from '@/types/api';
 
-export const API_BASE_URL =
-  (import.meta.env.VITE_API_URL as string | undefined)?.trim() ||
-  'http://localhost:8080';
+export const API_TIMEOUT_MS = 20_000;
+
+/**
+ * Resolves the API base URL, refusing to fall back to localhost in production builds.
+ */
+export function resolveApiBaseUrl(
+  rawUrl?: string,
+  isProd = import.meta.env.PROD,
+): string {
+  const trimmed = rawUrl?.trim();
+  if (trimmed) {
+    return trimmed;
+  }
+  if (isProd) {
+    console.error(
+      '[api] VITE_API_URL não configurada em produção; usando a origem atual como fallback.',
+    );
+    return typeof window !== 'undefined' ? window.location.origin : '';
+  }
+  return 'http://localhost:8080';
+}
+
+export const API_BASE_URL = resolveApiBaseUrl(
+  import.meta.env.VITE_API_URL as string | undefined,
+);
 
 const AUTH_ENDPOINTS = [
   '/api/v1/auth/login',
@@ -32,6 +54,7 @@ function isAuthEndpoint(url?: string): boolean {
 
 export const api = axios.create({
   baseURL: API_BASE_URL,
+  timeout: API_TIMEOUT_MS,
   withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
@@ -66,13 +89,20 @@ export async function refreshAccessToken(): Promise<string> {
     return refreshPromise;
   }
 
+  const startedVersion = useAuthStore.getState().sessionVersion;
+
   refreshPromise = (async () => {
     try {
       const { data } = await api.post<AuthResponse>('/api/v1/auth/refresh');
+      if (useAuthStore.getState().sessionVersion !== startedVersion) {
+        throw new Error('Session cleared during refresh');
+      }
       useAuthStore.getState().setSession(data.accessToken, data.user);
       return data.accessToken;
     } catch (error) {
-      useAuthStore.getState().clearSession();
+      if (useAuthStore.getState().sessionVersion === startedVersion) {
+        useAuthStore.getState().clearSession();
+      }
       throw error;
     } finally {
       refreshPromise = null;

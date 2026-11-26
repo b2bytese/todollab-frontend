@@ -22,4 +22,9 @@ describe('calculateDropPosition', () => {
     const items = [{ position: 1000 }, { position: 2000 }];
     expect(calculateDropPosition(items, 1)).toBe(1500);
   });
+
+  it('produces a strictly smaller position when first item position is <= 0', () => {
+    expect(calculateDropPosition([{ position: 0 }], 0)).toBe(-1000);
+    expect(calculateDropPosition([{ position: -500 }], 0)).toBe(-1500);
+  });
 });

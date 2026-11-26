@@ -20,6 +20,7 @@ import {
   clearPendingInviteToken,
   getPendingInviteToken,
   setPendingInviteToken,
+  shouldAutoAcceptPendingInvite,
 } from '@/lib/pendingInvite';
 import { useAuthStore } from '@/stores/authStore';
 
@@ -39,7 +40,7 @@ const signupSchema = z
     password: z
       .string()
       .min(8, 'A senha deve ter pelo menos 8 caracteres.')
-      .max(100, 'A senha deve ter no máximo 100 caracteres.'),
+      .max(128, 'A senha deve ter no máximo 128 caracteres.'),
     confirmPassword: z.string().min(1, 'Confirme sua senha.'),
   })
   .refine((data) => data.password === data.confirmPassword, {
@@ -55,7 +56,7 @@ export function SignupPage() {
   const setSession = useAuthStore((s) => s.setSession);
   const [formError, setFormError] = useState<string | null>(null);
 
-  const urlInviteToken = searchParams.get('inviteToken');
+  const urlInviteToken = searchParams.get('inviteToken')?.trim() || null;
   const inviteToken = urlInviteToken || getPendingInviteToken() || undefined;
 
   const {
@@ -85,18 +86,24 @@ export function SignupPage() {
 
       if (
         response.emailVerificationRequired === false &&
-        response.accessToken &&
-        response.joinedBoardId
+        response.accessToken
       ) {
         setSession(response.accessToken, response.user);
         clearPendingInviteToken();
         toast.success(`Bem-vindo(a) ao Todollab, ${response.user.name}!`);
-        navigate(`/app/boards/${response.joinedBoardId}`, { replace: true });
+        navigate(
+          response.joinedBoardId
+            ? `/app/boards/${response.joinedBoardId}`
+            : '/app/my-tasks',
+          { replace: true },
+        );
         return;
       }
 
       if (inviteToken) {
-        setPendingInviteToken(inviteToken);
+        setPendingInviteToken(inviteToken, {
+          autoAccept: shouldAutoAcceptPendingInvite(inviteToken),
+        });
       }
 
       toast.success(
@@ -137,10 +144,13 @@ export function SignupPage() {
             autoComplete="name"
             placeholder="Ana Silva"
             aria-invalid={Boolean(errors.name)}
+            aria-describedby={errors.name ? 'signup-name-error' : undefined}
             {...register('name')}
           />
           {errors.name ? (
-            <p className="text-xs text-destructive">{errors.name.message}</p>
+            <p id="signup-name-error" className="text-xs text-destructive">
+              {errors.name.message}
+            </p>
           ) : null}
         </div>
 
@@ -152,10 +162,13 @@ export function SignupPage() {
             autoComplete="email"
             placeholder="voce@empresa.com"
             aria-invalid={Boolean(errors.email)}
+            aria-describedby={errors.email ? 'signup-email-error' : undefined}
             {...register('email')}
           />
           {errors.email ? (
-            <p className="text-xs text-destructive">{errors.email.message}</p>
+            <p id="signup-email-error" className="text-xs text-destructive">
+              {errors.email.message}
+            </p>
           ) : null}
         </div>
 
@@ -166,10 +179,13 @@ export function SignupPage() {
             autoComplete="new-password"
             placeholder="Mínimo de 8 caracteres"
             aria-invalid={Boolean(errors.password)}
+            aria-describedby={errors.password ? 'signup-password-error' : undefined}
             {...register('password')}
           />
           {errors.password ? (
-            <p className="text-xs text-destructive">{errors.password.message}</p>
+            <p id="signup-password-error" className="text-xs text-destructive">
+              {errors.password.message}
+            </p>
           ) : null}
         </div>
 
@@ -180,10 +196,16 @@ export function SignupPage() {
             autoComplete="new-password"
             placeholder="Repita sua senha"
             aria-invalid={Boolean(errors.confirmPassword)}
+            aria-describedby={
+              errors.confirmPassword ? 'signup-confirm-password-error' : undefined
+            }
             {...register('confirmPassword')}
           />
           {errors.confirmPassword ? (
-            <p className="text-xs text-destructive">
+            <p
+              id="signup-confirm-password-error"
+              className="text-xs text-destructive"
+            >
               {errors.confirmPassword.message}
             </p>
           ) : null}

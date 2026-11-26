@@ -1,3 +1,4 @@
+import { useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { api, getApiError } from '@/lib/api';
@@ -14,6 +15,7 @@ export const boardKeys = {
   all: ['boards'] as const,
   detail: (boardId: string) => ['boards', boardId] as const,
   invites: (boardId: string) => ['boards', boardId, 'invites'] as const,
+  myTasksRoot: ['my-tasks'] as const,
   myTasks: (filters?: Record<string, string | boolean | undefined>) =>
     ['my-tasks', filters ?? {}] as const,
   myInvites: ['my-invites'] as const,
@@ -338,6 +340,8 @@ export function useUpdateColumnMutation(boardId: string) {
 
 export function useMoveColumnMutation(boardId: string) {
   const queryClient = useQueryClient();
+  const colMoveSeqRef = useRef(0);
+  const inFlightRef = useRef(0);
 
   return useMutation({
     mutationFn: ({
@@ -347,7 +351,50 @@ export function useMoveColumnMutation(boardId: string) {
       columnId: string;
       position: number;
     }) => moveColumn(boardId, columnId, { position }),
-    onSuccess: (columns) => {
+    onMutate: async ({ columnId, position }) => {
+      inFlightRef.current += 1;
+      colMoveSeqRef.current += 1;
+      const seq = colMoveSeqRef.current;
+
+      await queryClient.cancelQueries({ queryKey: boardKeys.detail(boardId) });
+      const previousDetail = queryClient.getQueryData<BoardDetail>(
+        boardKeys.detail(boardId),
+      );
+      const previousColumns = previousDetail?.columns;
+
+      if (previousDetail && colMoveSeqRef.current === seq) {
+        const nextColumns = previousDetail.columns
+          .map((col) => (col.id === columnId ? { ...col, position } : col))
+          .sort((a, b) => a.position - b.position);
+        queryClient.setQueryData<BoardDetail>(boardKeys.detail(boardId), {
+          ...previousDetail,
+          columns: nextColumns,
+        });
+      }
+
+      return { previousColumns, seq };
+    },
+    onError: (err, _variables, context) => {
+      const previousColumns = context?.previousColumns;
+      if (previousColumns && colMoveSeqRef.current === context?.seq) {
+        const current = queryClient.getQueryData<BoardDetail>(
+          boardKeys.detail(boardId),
+        );
+        if (current) {
+          queryClient.setQueryData<BoardDetail>(boardKeys.detail(boardId), {
+            ...current,
+            columns: previousColumns,
+          });
+        }
+      }
+      toast.error(
+        getApiError(err).detail ?? 'Não foi possível mover a coluna.',
+      );
+    },
+    onSuccess: (columns, _variables, context) => {
+      if (colMoveSeqRef.current !== context?.seq) {
+        return;
+      }
       const previous = queryClient.getQueryData<BoardDetail>(
         boardKeys.detail(boardId),
       );
@@ -357,12 +404,12 @@ export function useMoveColumnMutation(boardId: string) {
           columns,
         });
       }
-      void queryClient.invalidateQueries({ queryKey: boardKeys.detail(boardId) });
     },
-    onError: (err) => {
-      toast.error(
-        getApiError(err).detail ?? 'Não foi possível mover a coluna.',
-      );
+    onSettled: () => {
+      inFlightRef.current = Math.max(0, inFlightRef.current - 1);
+      if (inFlightRef.current === 0) {
+        void queryClient.invalidateQueries({ queryKey: boardKeys.detail(boardId) });
+      }
     },
   });
 }

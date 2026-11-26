@@ -13,6 +13,50 @@ export default defineConfig({
   server: {
     port: 5173,
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          const normalizedId = id.replace(/\\/g, '/');
+          if (!normalizedId.includes('/node_modules/')) {
+            return undefined;
+          }
+
+          if (
+            normalizedId.includes('/node_modules/react/') ||
+            normalizedId.includes('/node_modules/react-dom/') ||
+            normalizedId.includes('/node_modules/react-router/') ||
+            normalizedId.includes('/node_modules/react-router-dom/') ||
+            normalizedId.includes('/node_modules/scheduler/')
+          ) {
+            return 'vendor-react';
+          }
+
+          if (
+            normalizedId.includes('/node_modules/@tanstack/') ||
+            normalizedId.includes('/node_modules/axios/') ||
+            normalizedId.includes('/node_modules/zustand/')
+          ) {
+            return 'vendor-query';
+          }
+
+          if (normalizedId.includes('/node_modules/@dnd-kit/')) {
+            return 'vendor-dnd';
+          }
+
+          if (normalizedId.includes('/node_modules/@radix-ui/')) {
+            return 'vendor-radix';
+          }
+
+          if (normalizedId.includes('/node_modules/@stomp/stompjs/')) {
+            return 'vendor-stomp';
+          }
+
+          return undefined;
+        },
+      },
+    },
+  },
   test: {
     globals: true,
     environment: 'jsdom',
