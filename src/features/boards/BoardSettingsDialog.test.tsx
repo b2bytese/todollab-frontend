@@ -432,4 +432,92 @@ describe('BoardSettingsDialog', () => {
     });
     expect(toastSuccessSpy).toHaveBeenCalledWith('Coluna removida.');
   });
+
+  it('preservesColumnDeleteDialogSelectionWhenDetailUpdatesWithSameColumns', async () => {
+    const user = userEvent.setup();
+    const initialDetail = createBoardDetail('OWNER');
+    const { rerenderDialog } = renderSettingsDialog({ detail: initialDetail });
+
+    await user.click(screen.getByRole('tab', { name: /colunas/i }));
+    await user.click(
+      screen.getByRole('button', { name: /excluir coluna a fazer/i }),
+    );
+
+    const dialog = await screen.findByRole('dialog', {
+      name: /excluir coluna com tarefas/i,
+    });
+    const deleteRadio = within(dialog).getByRole('radio', {
+      name: /excluir todas as tarefas da coluna/i,
+    });
+    const moveRadio = within(dialog).getByRole('radio', {
+      name: /mover tarefas para outra coluna/i,
+    });
+
+    expect(moveRadio).toBeChecked();
+    await user.click(deleteRadio);
+    expect(deleteRadio).toBeChecked();
+
+    rerenderDialog({
+      detail: {
+        ...initialDetail,
+        board: {
+          ...initialDetail.board,
+          name: 'Produto V1 (atualizado)',
+          updatedAt: '2026-11-26T15:00:00Z',
+        },
+      },
+    });
+
+    expect(deleteRadio).toBeChecked();
+    expect(moveRadio).not.toBeChecked();
+  });
+
+  it('closesDialogAndDisablesColumnControlsWhenDemotedToViewer', async () => {
+    const user = userEvent.setup();
+    const onOpenChange = vi.fn();
+    const ownerDetail = createBoardDetail('OWNER');
+
+    const { rerenderDialog } = renderSettingsDialog({
+      open: true,
+      onOpenChange,
+      detail: ownerDetail,
+      canEdit: true,
+      isOwner: true,
+    });
+
+    await user.click(screen.getByRole('tab', { name: /colunas/i }));
+    expect(onOpenChange).not.toHaveBeenCalledWith(false);
+
+    rerenderDialog({
+      open: true,
+      detail: { ...ownerDetail, myRole: 'VIEWER' },
+      canEdit: false,
+      isOwner: false,
+    });
+
+    await waitFor(() => {
+      expect(onOpenChange).toHaveBeenCalledWith(false);
+    });
+
+    expect(screen.getByRole('tab', { name: /geral/i })).toBeDisabled();
+    expect(screen.getByRole('tab', { name: /colunas/i })).toBeDisabled();
+    expect(screen.getByLabelText(/nome da coluna a fazer/i)).toBeDisabled();
+    expect(screen.getByLabelText(/nome da nova coluna/i)).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: /mover vazia para cima/i }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: /mover vazia para baixo/i }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: /excluir coluna vazia/i }),
+    ).toBeDisabled();
+    expect(screen.getByRole('button', { name: /adicionar/i })).toBeDisabled();
+
+    const checkboxes = screen.getAllByRole('checkbox');
+    expect(checkboxes.length).toBeGreaterThan(0);
+    for (const checkbox of checkboxes) {
+      expect(checkbox).toBeDisabled();
+    }
+  });
 });

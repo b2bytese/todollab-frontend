@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import {
   ArrowDown,
   ArrowUp,
@@ -122,13 +122,20 @@ export function BoardSettingsDialog({
   }, [open, detail.board, detail.columns, isOwner]);
 
   useEffect(() => {
+    if (open && !canEdit) {
+      onOpenChange(false);
+    }
+  }, [open, canEdit, onOpenChange]);
+
+  useEffect(() => {
     if (!isOwner && activeTab === 'general') {
       setActiveTab('columns');
     }
   }, [isOwner, activeTab]);
 
-  const sortedColumns = [...detail.columns].sort(
-    (a, b) => a.position - b.position,
+  const sortedColumns = useMemo(
+    () => [...detail.columns].sort((a, b) => a.position - b.position),
+    [detail.columns],
   );
 
   const handleSaveBoard = (event: FormEvent<HTMLFormElement>) => {
@@ -192,6 +199,9 @@ export function BoardSettingsDialog({
   };
 
   const handleMoveColumn = (index: number, direction: -1 | 1) => {
+    if (!canEdit || moveColumnMutation.isPending) {
+      return;
+    }
     const targetIndex = index + direction;
     if (targetIndex < 0 || targetIndex >= sortedColumns.length) {
       return;
@@ -207,12 +217,15 @@ export function BoardSettingsDialog({
   };
 
   const openDeleteColumnModal = (column: BoardColumn) => {
+    if (!canEdit) {
+      return;
+    }
     const taskCount = detail.tasks.filter((t) => t.columnId === column.id).length;
     setDeleteTarget({ column, taskCount });
   };
 
   const handleConfirmEmptyDelete = () => {
-    if (!deleteTarget) {
+    if (!deleteTarget || !canEdit) {
       return;
     }
     deleteColumnMutation.mutate(
@@ -227,7 +240,7 @@ export function BoardSettingsDialog({
   };
 
   const handleConfirmDeleteWithTasks = (choice: ColumnDeleteChoice) => {
-    if (!deleteTarget) {
+    if (!deleteTarget || !canEdit) {
       return;
     }
     deleteColumnMutation.mutate(
@@ -244,9 +257,13 @@ export function BoardSettingsDialog({
     );
   };
 
-  const otherColumnsForDelete = deleteTarget
-    ? sortedColumns.filter((c) => c.id !== deleteTarget.column.id)
-    : [];
+  const otherColumnsForDelete = useMemo(
+    () =>
+      deleteTarget
+        ? sortedColumns.filter((c) => c.id !== deleteTarget.column.id)
+        : [],
+    [sortedColumns, deleteTarget],
+  );
 
   return (
     <>
@@ -260,7 +277,7 @@ export function BoardSettingsDialog({
           </DialogHeader>
 
           <Tabs
-            value={activeTab}
+            value={!isOwner && activeTab === 'general' ? 'columns' : activeTab}
             onValueChange={(value) =>
               setActiveTab(value as 'general' | 'columns')
             }
@@ -452,6 +469,7 @@ export function BoardSettingsDialog({
                     >
                       <Input
                         value={draftName}
+                        disabled={!canEdit}
                         onChange={(e) =>
                           setColumnEdits((prev) => ({
                             ...prev,
@@ -459,6 +477,9 @@ export function BoardSettingsDialog({
                           }))
                         }
                         onBlur={() => {
+                          if (!canEdit) {
+                            return;
+                          }
                           const trimmed = draftName.trim();
                           if (!trimmed) {
                             setColumnEdits((prev) => ({
@@ -483,12 +504,16 @@ export function BoardSettingsDialog({
                         <Checkbox
                           id={`col-done-${column.id}`}
                           checked={column.isDoneColumn}
-                          onCheckedChange={(checked) =>
+                          disabled={!canEdit}
+                          onCheckedChange={(checked) => {
+                            if (!canEdit) {
+                              return;
+                            }
                             updateColumnMutation.mutate({
                               columnId: column.id,
                               payload: { isDoneColumn: Boolean(checked) },
-                            })
-                          }
+                            });
+                          }}
                         />
                         <Label
                           htmlFor={`col-done-${column.id}`}
@@ -504,7 +529,11 @@ export function BoardSettingsDialog({
                           variant="ghost"
                           size="icon"
                           className="h-7 w-7"
-                          disabled={index === 0 || moveColumnMutation.isPending}
+                          disabled={
+                            !canEdit ||
+                            index === 0 ||
+                            moveColumnMutation.isPending
+                          }
                           aria-label={`Mover ${column.name} para cima`}
                           onClick={() => handleMoveColumn(index, -1)}
                         >
@@ -516,6 +545,7 @@ export function BoardSettingsDialog({
                           size="icon"
                           className="h-7 w-7"
                           disabled={
+                            !canEdit ||
                             index === sortedColumns.length - 1 ||
                             moveColumnMutation.isPending
                           }
@@ -530,6 +560,7 @@ export function BoardSettingsDialog({
                           size="icon"
                           className="h-7 w-7 text-muted-foreground hover:text-destructive"
                           disabled={
+                            !canEdit ||
                             sortedColumns.length <= 1 ||
                             deleteColumnMutation.isPending
                           }
@@ -559,12 +590,13 @@ export function BoardSettingsDialog({
                     aria-label="Nome da nova coluna"
                     maxLength={80}
                     className="h-8 flex-1 min-w-[160px]"
-                    disabled={createColumnMutation.isPending}
+                    disabled={!canEdit || createColumnMutation.isPending}
                   />
                   <div className="flex items-center gap-1.5">
                     <Checkbox
                       id="new-col-done"
                       checked={newColumnIsDone}
+                      disabled={!canEdit || createColumnMutation.isPending}
                       onCheckedChange={(checked) =>
                         setNewColumnIsDone(Boolean(checked))
                       }
@@ -582,7 +614,9 @@ export function BoardSettingsDialog({
                     variant="coral"
                     className="h-8"
                     disabled={
-                      !newColumnName.trim() || createColumnMutation.isPending
+                      !canEdit ||
+                      !newColumnName.trim() ||
+                      createColumnMutation.isPending
                     }
                   >
                     <Plus className="h-3.5 w-3.5" aria-hidden="true" />
