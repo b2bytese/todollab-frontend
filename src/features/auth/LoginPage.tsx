@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Loader2 } from 'lucide-react';
 import { useForm } from 'react-hook-form';
@@ -16,7 +16,11 @@ import {
   PasswordInput,
 } from '@/features/auth/authFormHelpers';
 import { getApiError } from '@/lib/api';
-import { getPendingInviteToken, setPendingInviteToken } from '@/lib/pendingInvite';
+import {
+  getPendingInviteToken,
+  setPendingInviteToken,
+  shouldAutoAcceptPendingInvite,
+} from '@/lib/pendingInvite';
 import { useAuthStore } from '@/stores/authStore';
 
 const loginSchema = z.object({
@@ -45,13 +49,7 @@ export function LoginPage() {
   const setSession = useAuthStore((s) => s.setSession);
   const [formError, setFormError] = useState<string | null>(null);
 
-  const urlInviteToken = searchParams.get('inviteToken');
-
-  useEffect(() => {
-    if (urlInviteToken) {
-      setPendingInviteToken(urlInviteToken);
-    }
-  }, [urlInviteToken]);
+  const urlInviteToken = searchParams.get('inviteToken')?.trim() || null;
 
   const {
     register,
@@ -79,7 +77,7 @@ export function LoginPage() {
 
       const inviteToken = urlInviteToken || getPendingInviteToken();
       if (inviteToken) {
-        navigate(`/invite/${inviteToken}`, { replace: true });
+        navigate(`/invite/${encodeURIComponent(inviteToken)}`, { replace: true });
         return;
       }
 
@@ -91,6 +89,11 @@ export function LoginPage() {
     } catch (err) {
       const apiErr = getApiError(err);
       if (apiErr.status === 403 && apiErr.code === 'EMAIL_NOT_VERIFIED') {
+        if (urlInviteToken) {
+          setPendingInviteToken(urlInviteToken, {
+            autoAccept: shouldAutoAcceptPendingInvite(urlInviteToken),
+          });
+        }
         toast.info('Confirme seu e-mail antes de entrar.');
         navigate(
           `/verify-email?email=${encodeURIComponent(values.email.trim())}`,
@@ -124,10 +127,13 @@ export function LoginPage() {
             autoComplete="email"
             placeholder="voce@empresa.com"
             aria-invalid={Boolean(errors.email)}
+            aria-describedby={errors.email ? 'login-email-error' : undefined}
             {...register('email')}
           />
           {errors.email ? (
-            <p className="text-xs text-destructive">{errors.email.message}</p>
+            <p id="login-email-error" className="text-xs text-destructive">
+              {errors.email.message}
+            </p>
           ) : null}
         </div>
 
@@ -146,10 +152,13 @@ export function LoginPage() {
             autoComplete="current-password"
             placeholder="Digite sua senha"
             aria-invalid={Boolean(errors.password)}
+            aria-describedby={errors.password ? 'login-password-error' : undefined}
             {...register('password')}
           />
           {errors.password ? (
-            <p className="text-xs text-destructive">{errors.password.message}</p>
+            <p id="login-password-error" className="text-xs text-destructive">
+              {errors.password.message}
+            </p>
           ) : null}
         </div>
 

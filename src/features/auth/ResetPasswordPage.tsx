@@ -31,7 +31,7 @@ const resetPasswordSchema = z
     newPassword: z
       .string()
       .min(8, 'A nova senha deve ter pelo menos 8 caracteres.')
-      .max(100, 'A nova senha deve ter no máximo 100 caracteres.'),
+      .max(128, 'A nova senha deve ter no máximo 128 caracteres.'),
     confirmNewPassword: z.string().min(1, 'Confirme a nova senha.'),
   })
   .refine((data) => data.newPassword === data.confirmNewPassword, {
@@ -101,10 +101,13 @@ export function ResetPasswordPage() {
             autoComplete="email"
             placeholder="voce@empresa.com"
             aria-invalid={Boolean(errors.email)}
+            aria-describedby={errors.email ? 'reset-email-error' : undefined}
             {...register('email')}
           />
           {errors.email ? (
-            <p className="text-xs text-destructive">{errors.email.message}</p>
+            <p id="reset-email-error" className="text-xs text-destructive">
+              {errors.email.message}
+            </p>
           ) : null}
         </div>
 
@@ -119,10 +122,13 @@ export function ResetPasswordPage() {
             placeholder="000000"
             className="tracking-[0.25em] font-mono text-center text-base"
             aria-invalid={Boolean(errors.code)}
+            aria-describedby={errors.code ? 'reset-code-error' : undefined}
             {...register('code')}
           />
           {errors.code ? (
-            <p className="text-xs text-destructive">{errors.code.message}</p>
+            <p id="reset-code-error" className="text-xs text-destructive">
+              {errors.code.message}
+            </p>
           ) : null}
         </div>
 
@@ -133,10 +139,15 @@ export function ResetPasswordPage() {
             autoComplete="new-password"
             placeholder="Mínimo de 8 caracteres"
             aria-invalid={Boolean(errors.newPassword)}
+            aria-describedby={
+              errors.newPassword ? 'reset-password-error' : undefined
+            }
             {...register('newPassword')}
           />
           {errors.newPassword ? (
-            <p className="text-xs text-destructive">{errors.newPassword.message}</p>
+            <p id="reset-password-error" className="text-xs text-destructive">
+              {errors.newPassword.message}
+            </p>
           ) : null}
         </div>
 
@@ -147,10 +158,18 @@ export function ResetPasswordPage() {
             autoComplete="new-password"
             placeholder="Repita a nova senha"
             aria-invalid={Boolean(errors.confirmNewPassword)}
+            aria-describedby={
+              errors.confirmNewPassword
+                ? 'reset-confirm-password-error'
+                : undefined
+            }
             {...register('confirmNewPassword')}
           />
           {errors.confirmNewPassword ? (
-            <p className="text-xs text-destructive">
+            <p
+              id="reset-confirm-password-error"
+              className="text-xs text-destructive"
+            >
               {errors.confirmNewPassword.message}
             </p>
           ) : null}

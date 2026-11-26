@@ -76,10 +76,13 @@ export function ForgotPasswordPage() {
             autoComplete="email"
             placeholder="voce@empresa.com"
             aria-invalid={Boolean(errors.email)}
+            aria-describedby={errors.email ? 'forgot-email-error' : undefined}
             {...register('email')}
           />
           {errors.email ? (
-            <p className="text-xs text-destructive">{errors.email.message}</p>
+            <p id="forgot-email-error" className="text-xs text-destructive">
+              {errors.email.message}
+            </p>
           ) : null}
         </div>
 
