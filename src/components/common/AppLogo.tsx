@@ -16,7 +16,7 @@ export function AppLogo({
   return (
     <div className={cn('inline-flex items-center gap-2.5 select-none', className)}>
       <img
-        src="/logo.jpeg"
+        src="/logo.png"
         alt="Todollab"
         className={cn(
           'rounded-lg object-cover ring-1 ring-border/80 shadow-xs shrink-0',
@@ -25,7 +25,7 @@ export function AppLogo({
       />
       {shouldShowText ? (
         <span className="font-heading text-lg font-bold tracking-tight text-foreground">
-          Todo<span className="text-brand-coral">llab</span>
+          Todollab
         </span>
       ) : null}
     </div>

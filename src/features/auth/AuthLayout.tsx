@@ -39,12 +39,12 @@ export function AuthLayout({ title, description, children }: AuthLayoutProps) {
 
         <div className="relative z-10 inline-flex items-center gap-2.5">
           <img
-            src="/logo.jpeg"
+            src="/logo.png"
             alt="Todollab"
             className="h-10 w-10 rounded-lg object-cover ring-1 ring-white/20 shadow-sm"
           />
           <span className="font-heading text-xl font-bold tracking-tight text-white">
-            Todo<span className="text-brand-coral">llab</span>
+            Todollab
           </span>
         </div>
 

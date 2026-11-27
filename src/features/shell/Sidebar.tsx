@@ -64,7 +64,7 @@ function BoardSection({
   return (
     <section aria-label={title} className="space-y-2">
       {!collapsed ? (
-        <h2 className="mb-2 px-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <h2 className="mb-2 px-2.5 text-xs font-medium text-muted-foreground">
           {title}
         </h2>
       ) : null}
