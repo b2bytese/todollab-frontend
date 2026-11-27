@@ -18,6 +18,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/authStore';
+import { useTheme } from '@/components/common/ThemeProvider';
 
 const PREVIEW_COLUMNS = [
   {
@@ -526,6 +527,7 @@ export function LandingPage() {
   const status = useAuthStore((s) => s.status);
   const user = useAuthStore((s) => s.user);
   const isAuthenticated = status === 'authenticated';
+  const { resolvedTheme } = useTheme();
 
   const handleTabKeyDown = (
     event: KeyboardEvent<HTMLButtonElement>,
@@ -563,7 +565,7 @@ export function LandingPage() {
   return (
     <div className="min-h-screen flex flex-col bg-background text-foreground">
       {/* Section 1 — Sticky Header */}
-      <header className="dark sticky top-0 z-30 border-b border-editorial-border/60 bg-editorial-bg/95 text-editorial-fg backdrop-blur-md">
+      <header className="sticky top-0 z-30 border-b border-editorial-border/60 bg-editorial-bg/95 text-editorial-fg backdrop-blur-md">
         <div className="max-w-6xl mx-auto h-16 flex items-center justify-between gap-2 sm:gap-4 px-3 sm:px-6">
           <Link
             to="/"
@@ -668,7 +670,7 @@ export function LandingPage() {
 
       <main className="flex-1">
         {/* Section 2 — Hero */}
-        <section className="dark relative overflow-hidden bg-editorial-bg">
+        <section className="relative overflow-hidden bg-editorial-bg">
           {/* Geometric decorator */}
           <div
             aria-hidden="true"
@@ -851,7 +853,7 @@ export function LandingPage() {
         </section>
 
         {/* Section 4 — How It Works */}
-        <section id="processo" className="dark bg-editorial-bg text-editorial-fg">
+        <section id="processo" className="bg-editorial-bg text-editorial-fg">
           <div className="max-w-6xl mx-auto px-4 py-20 sm:py-24 sm:px-6">
             <span className="text-brand-coral text-[11px] uppercase tracking-[0.15em] font-semibold">
               02 / Como funciona
@@ -927,13 +929,13 @@ export function LandingPage() {
 
       {/* Section 6 — Editorial Footer */}
       <footer
-        className="dark m-3 overflow-hidden rounded-2xl relative min-h-[600px] flex flex-col justify-between bg-editorial-bg"
-        style={{
+        className="m-3 overflow-hidden rounded-2xl relative min-h-[600px] flex flex-col justify-between bg-editorial-bg"
+        style={resolvedTheme === 'dark' ? {
           backgroundImage:
             "url('/footer-art.svg'), linear-gradient(var(--editorial-bg), var(--editorial-bg))",
           backgroundSize: 'cover',
           backgroundPosition: 'center',
-        }}
+        } : undefined}
       >
         {/* Overlay */}
         <div
@@ -976,7 +978,7 @@ export function LandingPage() {
               </p>
 
               {/* Footer CTA bar */}
-              <div className="flex items-center justify-between bg-editorial-paper text-editorial-surface rounded-xl p-3 max-w-md mb-10 gap-3">
+              <div className="flex items-center justify-between bg-editorial-paper text-brand-navy rounded-xl p-3 max-w-md mb-10 gap-3">
                 <span className="font-semibold pl-2 text-sm">
                   {isAuthenticated
                     ? 'Continuar no Todollab'

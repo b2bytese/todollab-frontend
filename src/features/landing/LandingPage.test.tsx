@@ -106,11 +106,11 @@ describe('LandingPage', () => {
     expect(screen.queryByRole('navigation', { name: /navegação mobile/i })).not.toBeInTheDocument();
   });
 
-  it('rendersDarkScopedEditorialHeaderAndB2byteSignatureInFooter', () => {
+  it('rendersEditorialHeaderAndB2byteSignatureInFooter', () => {
     const { container } = renderLandingPage();
 
     const header = container.querySelector('header');
-    expect(header).toHaveClass('dark');
+    expect(header).toHaveClass('sticky', 'bg-editorial-bg/95', 'text-editorial-fg');
 
     const signatureLink = screen.getByRole('link', {
       name: /b2byte software engineering — produto proprietário do todollab/i,
