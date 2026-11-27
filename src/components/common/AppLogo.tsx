@@ -19,7 +19,16 @@ export function AppLogo({
         src="/logo.png"
         alt="Todollab"
         className={cn(
-          'rounded-lg object-cover ring-1 ring-border/80 shadow-xs shrink-0',
+          'rounded-lg object-cover shrink-0 dark:hidden',
+          compact ? 'h-8 w-8' : 'h-9 w-9',
+        )}
+      />
+      <img
+        src="/logo-dark.png"
+        alt=""
+        aria-hidden="true"
+        className={cn(
+          'rounded-lg object-cover shrink-0 hidden dark:block',
           compact ? 'h-8 w-8' : 'h-9 w-9',
         )}
       />

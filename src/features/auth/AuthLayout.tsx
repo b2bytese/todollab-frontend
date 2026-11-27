@@ -39,7 +39,7 @@ export function AuthLayout({ title, description, children }: AuthLayoutProps) {
 
         <div className="relative z-10 inline-flex items-center gap-2.5">
           <img
-            src="/logo.png"
+            src="/logo-dark.png"
             alt="Todollab"
             className="h-10 w-10 rounded-lg object-cover ring-1 ring-white/20 shadow-sm"
           />
